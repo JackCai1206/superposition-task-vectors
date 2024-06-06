@@ -19,6 +19,8 @@ class ScriptArguments:
     average_over: int
     use_task_vec_cache: bool = True
     use_results_cache: bool = True
+    do_interpolation: bool = True
+    do_residual: bool = True
 
 if __name__ == '__main__':
     set_seed(42)
@@ -46,16 +48,14 @@ if __name__ == '__main__':
     layers = list(range(model.cfg.n_layers))
     dataset_1 = Dataset({args.task1: 1}, args.num_examples, args.prompt_size, reseed=42)
     tv_file_1 = get_task_vectors_from_dataset(model, tokenizer, device, dataset_1, layers, args)
-    print(f'Best layer for {args.task1}: {tv_file_1["best_layer"]}')
 
     dataset_2 = Dataset({args.task2: 1}, args.num_examples, args.prompt_size, reseed=42)
     tv_file_2 = get_task_vectors_from_dataset(model, tokenizer, device, dataset_2, layers, args)
-    print(f'Best layer for {args.task2}: {tv_file_2["best_layer"]}')
 
     # Interpolate between the task vectors
-    # task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, args)
+    if args.do_interpolation: task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, args)
     
     # Look at residual of mixed dataset
-    mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, args)
+    if args.do_residual: mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, args)
     
     breakpoint()

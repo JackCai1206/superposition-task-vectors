@@ -108,13 +108,14 @@ def get_task_vectors_from_dataset(model, tokenizer, device, dataset: Dataset, la
         if len(file['task_vecs']) == len(layers) and file['dataset'] == dataset:
             return file
 
-    print(f'Generating task vectors for {dataset.cfg_dict}')
+    print(f'Generating task vectors for {dataset.cfg_dict} with dataset seed {dataset.seed}')
     os.makedirs(os.path.dirname(save_loc), exist_ok=True)
     task_vecs = get_task_vecs(model, layers, dataset, tokenizer, device)
     if len(dataset.cfg_dict) == 1:
         accs = eval_task_vectors(model, tokenizer, device, dataset, task_vecs)
         print(accs)
         best_layer = np.argmax(accs)
+        print(f'Best layer for {list(dataset.cfg_dict.keys())[0]}: {best_layer}')
     else:
         best_layer = 0
     # Save the task vectors
@@ -181,10 +182,10 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
     for i, layer in enumerate(layers):
         save_loc = f'out/task_vector_interpolation/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_layer-{layer}.pdf'
         os.makedirs(os.path.dirname(save_loc), exist_ok=True)
-        plt.figure(figsize=(6, 4))
+        plt.figure(figsize=(6, 5))
         plt.title(f'{args.task1} to {args.task2}\n average over {args.average_over} examples\nLayer {layer}')
         for task_num, prob_list in enumerate(result[i]):
-            label = f'Task {task_num}' if task_num <= 1 else 'Other'
+            label = [args.task1, args.task2, 'other'][task_num]
             plt.plot(lambs, prob_list, label=label)
         # plt.title(title + '\nQuestion: ' + repr(question)[1:-1] + '(' + '|'.join(target_tokens) + ')')
         plt.xlabel('lambda')
@@ -235,6 +236,19 @@ def mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, 
                     y = tv_mixed.cpu().float().numpy()
                     lr.fit(X, y)
                     resid = np.linalg.norm(y - lr.predict(X))
+                    # resid = 0
+                    # for i in range(args.num_examples):
+                    #     tv_1 = task_vecs_1[layer][i]
+                    #     tv_1 /= tv_1.norm()
+                    #     tv_2 = task_vecs_2[layer][i]
+                    #     tv_2 /= tv_2.norm()
+                    #     tv_mixed = task_vecs_mixed[layer].mean(0)
+                    #     tv_mixed /= tv_mixed.norm()
+                    #     X = torch.stack([tv_1, tv_2]).T.cpu().float().numpy()
+                    #     y = tv_mixed.cpu().float().numpy()
+                    #     lr.fit(X, y)
+                    #     resid += np.linalg.norm(y - lr.predict(X))
+                    # resid /= args.num_examples
                     resid_list.append(resid)
                 result_list[-1].append(resid_list)
         result = torch.tensor(result_list).mean(0)
@@ -243,7 +257,7 @@ def mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, 
     plt.figure(figsize=(6, 4))
     plt.title(f'Mixed dataset residual\n average over {args.average_over}')
     for i, frac in enumerate(mix_fracs):
-        save_loc = f'out/mixed_dataset_residual/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_norm.pdf'
+        save_loc = f'out/mixed_dataset_residual/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}.pdf'
         os.makedirs(os.path.dirname(save_loc), exist_ok=True)
         label = f'{args.task1.split("/")[0]} frac {frac}'
         plt.plot(layers, result[i], label=label)
