@@ -8,5 +8,5 @@ for model_id in "meta-llama/Llama-2-7b-hf"; do
         --prompt_size=100 \
         --task1="COPY_A/NOP/NOP/NOP" \
         --task2="COPY_B/NOP/NOP/NOP" \
-        --interpolation_average_over=10
+        --average_over=5
 done

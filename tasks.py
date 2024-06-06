@@ -68,7 +68,6 @@ def sample_operands(k):
     return list(zip(A, B))
 
 def get_dataset(cfg_dict, num_examples, prompt_size):
-    set_seed(42)
     dataset = []
     for i in range(num_examples):
         dist = list(cfg_dict.values())
@@ -87,7 +86,7 @@ def get_dataset(cfg_dict, num_examples, prompt_size):
         while True:
             operands = sample_operands(1)[0]
             task_strs = [get_task(*operands, tasks[i].split('/')) for i in range(len(tasks))]
-            questions, answers = list(map(list, zip(*task_strs)))
+            questions, answers = tuple(map(list, zip(*task_strs)))
             if len(set(answers)) == len(answers):
                 break
             c += 1
@@ -95,3 +94,25 @@ def get_dataset(cfg_dict, num_examples, prompt_size):
                 raise Exception('Cannot find a question with unique answers per task')
         dataset.append((prompt, '\n' + questions[0] + '->', answers))
     return dataset
+
+class Dataset():
+    def __init__(self, cfg_dict, num_examples, prompt_size, reseed=None):
+        if reseed:
+            set_seed(reseed)
+            self.seed = reseed
+        else:
+            set_seed(42)
+            self.seed = 42
+        self.data = get_dataset(cfg_dict, num_examples, prompt_size)
+        self.cfg_dict = cfg_dict
+        self.num_examples = num_examples
+        self.prompt_size = prompt_size
+
+    def __getitem__(self, i):
+        return self.data[i]
+
+    def __len__(self):
+        return len(self.data)
+
+    def __eq__(self, other):
+        return self.data == other.data

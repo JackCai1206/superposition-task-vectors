@@ -6,7 +6,9 @@ from functools import partial
 from tqdm import tqdm
 from collections import defaultdict
 import os
-from tasks import get_dataset
+from tasks import Dataset
+from matplotlib import pyplot as plt
+import numpy as np
 
 # Function to generate text
 def get_task_vecs(model: HookedTransformer, layers, dataset, tokenizer, device):
@@ -95,38 +97,37 @@ def eval_task_vectors(model, tokenizer, device, dataset, task_vecs):
     # breakpoint()
     return acc_A
 
-def get_task_vectors_from_cfg(model, tokenizer, device, cfg_dict, layers, args):
+def get_task_vectors_from_dataset(model, tokenizer, device, dataset: Dataset, layers, args):
     # Get the task vectors
-    task_vecs, dataset, best_layer = None, None, None
-    cfg_dict_str = str(cfg_dict).replace('/', '-').replace(' ', '').replace('{', '').replace('}', '').replace(':', '-').replace('\'', '')
-    save_loc = f'out/task_vectors/{args.model_id}/{cfg_dict_str}.pt'
+    task_vecs, best_layer = None, None
+    cfg_dict_str = str(dataset.cfg_dict).replace('/', '-').replace(' ', '').replace('{', '').replace('}', '').replace(':', '-').replace('\'', '')
+    save_loc = f'out/task_vectors/{args.model_id}/{dataset.seed}/{cfg_dict_str}.pt'
     if os.path.exists(save_loc) and args.use_task_vec_cache:
         print(f'Loading task vectors from {save_loc}')
         file = torch.load(save_loc)
-        cfg_dict = file['cfg_dict']
-        task_vecs = file['task_vecs']
-        dataset = file['dataset']
-        best_layer = file['best_layer']
-    else:
-        print(f'Generating task vectors for {cfg_dict}')
-        os.makedirs(os.path.dirname(save_loc), exist_ok=True)
-        dataset = get_dataset(cfg_dict, args.num_examples, args.prompt_size)
-        task_vecs = get_task_vecs(model, layers, dataset, tokenizer, device)
+        if len(file['task_vecs']) == len(layers) and file['dataset'] == dataset:
+            return file
+
+    print(f'Generating task vectors for {dataset.cfg_dict}')
+    os.makedirs(os.path.dirname(save_loc), exist_ok=True)
+    task_vecs = get_task_vecs(model, layers, dataset, tokenizer, device)
+    if len(dataset.cfg_dict) == 1:
         accs = eval_task_vectors(model, tokenizer, device, dataset, task_vecs)
         print(accs)
         best_layer = np.argmax(accs)
-        # Save the task vectors
-        torch.save({
-            'cfg_dict': cfg_dict,
-            'task_vecs': task_vecs,
-            'dataset': dataset,
-            'model_id': args.model_id,
-            'best_layer': best_layer
-        }, save_loc)
+    else:
+        best_layer = 0
+    # Save the task vectors
+    file = {
+        'cfg_dict': dataset.cfg_dict,
+        'task_vecs': task_vecs,
+        'dataset': dataset,
+        'model_id': args.model_id,
+        'best_layer': best_layer
+    }
+    torch.save(file, save_loc)
     
-    return dataset, task_vecs, best_layer
-
-import numpy as np 
+    return file
 
 def get_task_vec_interpolation(model, tokenizer, device, task_vecs_A, task_vecs_B, lambs, layers, question, answers):
     assert len(answers) == 2
@@ -148,3 +149,106 @@ def get_task_vec_interpolation(model, tokenizer, device, task_vecs_A, task_vecs_
             prob_dict[2].append(1 - sum([prob_dict[i][-1] for i, ans in enumerate(answers)]))
         probs_by_layer.append(prob_dict)
     return probs_by_layer, lambs
+
+def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, args):
+    # # create mixed dataset
+    cfg_dict = {args.task1: 0.5, args.task2: 0.5}
+    dataset = Dataset(cfg_dict, args.num_examples, args.prompt_size)
+    best_layer_1 = tv_file_1['best_layer']
+    best_layer_2 = tv_file_2['best_layer']
+    task_vecs_1 = tv_file_1['task_vecs']
+    task_vecs_2 = tv_file_2['task_vecs']
+
+    # # Interpolate between the task vectors
+    result_loc = f'out/task_vector_interpolation/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_results.pt'
+    lambs = torch.linspace(0, 1, 30)
+    layers = list(range(min(best_layer_1, best_layer_2), max(best_layer_1, best_layer_2) + 1))
+    if os.path.exists(result_loc) and args.use_results_cache:
+        print(f'Loading results from {result_loc}')
+        result = torch.load(result_loc)
+    else:
+        os.makedirs(os.path.dirname(result_loc), exist_ok=True)
+        result_list = []
+        for example in tqdm(dataset[:args.average_over]):
+            test_q = example[1]
+            test_ans = example[2]
+            result, lambs = get_task_vec_interpolation(model, tokenizer, device, task_vecs_1, task_vecs_2, lambs, layers, test_q, test_ans)
+            result_list.append(result)
+
+        result = torch.tensor(result_list).mean(0)
+        torch.save(result, result_loc)
+
+    for i, layer in enumerate(layers):
+        save_loc = f'out/task_vector_interpolation/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_layer-{layer}.pdf'
+        os.makedirs(os.path.dirname(save_loc), exist_ok=True)
+        plt.figure(figsize=(6, 4))
+        plt.title(f'{args.task1} to {args.task2}\n average over {args.average_over} examples\nLayer {layer}')
+        for task_num, prob_list in enumerate(result[i]):
+            label = f'Task {task_num}' if task_num <= 1 else 'Other'
+            plt.plot(lambs, prob_list, label=label)
+        # plt.title(title + '\nQuestion: ' + repr(question)[1:-1] + '(' + '|'.join(target_tokens) + ')')
+        plt.xlabel('lambda')
+        plt.ylabel('P(ans)')
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.legend()
+        plt.savefig(save_loc)
+
+from sklearn.linear_model import LinearRegression
+
+def mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, args):
+    best_layer_1 = tv_file_1['best_layer']
+    best_layer_2 = tv_file_2['best_layer']
+    task_vecs_1 = tv_file_1['task_vecs']
+    task_vecs_2 = tv_file_2['task_vecs']
+    
+    mix_fracs = [0.2, 0.4, 0.6, 0.8]
+    layers = range(model.cfg.n_layers)
+
+    result_loc = f'out/mixed_dataset_residual/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_results.pt'
+    results = None
+    if os.path.exists(result_loc) and args.use_results_cache:
+        print(f'Loading results from {result_loc}')
+        result = torch.load(result_loc)
+    
+    if results is None or len(result) != len(mix_fracs):
+        os.makedirs(os.path.dirname(result_loc), exist_ok=True)
+        lr = LinearRegression()
+        result_list = []
+
+        for trial in range(args.average_over):
+            result_list.append([])
+            for task_1_frac in mix_fracs:
+                cfg_dict = {args.task1: np.round(task_1_frac, 2), args.task2: np.round(1 - task_1_frac, 2)}
+                dataset_mixed = Dataset(cfg_dict, args.num_examples, args.prompt_size, reseed=42+trial)
+                tv_file_mixed = get_task_vectors_from_dataset(model, tokenizer, device, dataset_mixed, layers, args)
+                task_vecs_mixed = tv_file_mixed['task_vecs']
+                resid_list = []
+                for layer in layers:
+                    tv_1 = task_vecs_1[layer].mean(0)
+                    tv_1 /= tv_1.norm()
+                    tv_2 = task_vecs_2[layer].mean(0)
+                    tv_2 /= tv_2.norm()
+                    tv_mixed = task_vecs_mixed[layer].mean(0)
+                    tv_mixed /= tv_mixed.norm()
+                    X = torch.stack([tv_1, tv_2]).T.cpu().float().numpy()
+                    y = tv_mixed.cpu().float().numpy()
+                    lr.fit(X, y)
+                    resid = np.linalg.norm(y - lr.predict(X))
+                    resid_list.append(resid)
+                result_list[-1].append(resid_list)
+        result = torch.tensor(result_list).mean(0)
+        torch.save(result, result_loc)
+
+    plt.figure(figsize=(6, 4))
+    plt.title(f'Mixed dataset residual\n average over {args.average_over}')
+    for i, frac in enumerate(mix_fracs):
+        save_loc = f'out/mixed_dataset_residual/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_norm.pdf'
+        os.makedirs(os.path.dirname(save_loc), exist_ok=True)
+        label = f'{args.task1.split("/")[0]} frac {frac}'
+        plt.plot(layers, result[i], label=label)
+        # plt.title(title + '\nQuestion: ' + repr(question)[1:-1] + '(' + '|'.join(target_tokens) + ')')
+    plt.xlabel('layer')
+    plt.ylabel('linear fit residual')
+    plt.legend()
+    plt.savefig(save_loc)
