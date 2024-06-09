@@ -9,6 +9,7 @@ import os
 from tasks import Dataset
 from matplotlib import pyplot as plt
 import numpy as np
+import seaborn as sns
 
 # Function to generate text
 def get_task_vecs(model: HookedTransformer, layers, dataset, tokenizer, device):
@@ -131,7 +132,7 @@ def get_task_vectors_from_dataset(model, tokenizer, device, dataset: Dataset, la
     return file
 
 def get_task_vec_interpolation(model, tokenizer, device, task_vecs_A, task_vecs_B, lambs, layers, question, answers):
-    assert len(answers) == 2
+    # assert len(answers) == 2
     # plt.figure(figsize=(10, 4))
     probs_by_layer = []
     for patch_layer in layers:
@@ -140,14 +141,14 @@ def get_task_vec_interpolation(model, tokenizer, device, task_vecs_A, task_vecs_
         tv_A = task_vecs_A[patch_layer].mean(0)
         tv_B = task_vecs_B[patch_layer].mean(0)
 
-        prob_dict = [[] for _ in range(3)]
+        prob_dict = [[] for _ in range(len(answers) + 1)] # probability sweep for each task and last one is "other"
         for lamb in lambs:
-            tv_mix = (lamb * tv_A + (1-lamb) * tv_B)
+            tv_mix = (lamb * tv_B + (1-lamb) * tv_A)
             # multiply the conditional probabilities of the tokens in the string
             for task_num, ans in enumerate(answers):
                 ans_prob = patch_get_output_prob(model, tokenizer, device, question, ans, patch_layer, tv_mix)
                 prob_dict[task_num].append(ans_prob.item())
-            prob_dict[2].append(1 - sum([prob_dict[i][-1] for i, ans in enumerate(answers)]))
+            prob_dict[-1].append(1 - sum([prob_dict[i][-1] for i, ans in enumerate(answers)]))
         probs_by_layer.append(prob_dict)
     return probs_by_layer, lambs
 
@@ -180,13 +181,19 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         torch.save(result, result_loc)
 
     for i, layer in enumerate(layers):
-        save_loc = f'out/task_vector_interpolation/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_layer-{layer}.pdf'
+        save_loc = f'out/task_vector_interpolation/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}/layer-{layer}.pdf'
         os.makedirs(os.path.dirname(save_loc), exist_ok=True)
         plt.figure(figsize=(6, 5))
         plt.title(f'{args.task1} to {args.task2}\n average over {args.average_over} examples\nLayer {layer}')
-        for task_num, prob_list in enumerate(result[i]):
-            label = [args.task1, args.task2, 'other'][task_num]
-            plt.plot(lambs, prob_list, label=label)
+        task_names = dataset.all_tasks + ['other']
+        # for task_num, prob_list in enumerate(result[i]):
+        #     label = task_names[task_num]
+        #     plt.plot(lambs, prob_list, label=label)
+        blues = sns.color_palette("flare", len(dataset.given_tasks))
+        reds = sns.color_palette("crest", len(dataset.extra_tasks))
+        grey = [sns.colors.crayons['Gray']]
+        colors = blues + reds + grey
+        plt.stackplot(lambs, *result[i], labels=task_names, colors=colors)
         # plt.title(title + '\nQuestion: ' + repr(question)[1:-1] + '(' + '|'.join(target_tokens) + ')')
         plt.xlabel('lambda')
         plt.ylabel('P(ans)')
