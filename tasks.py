@@ -13,6 +13,8 @@ class OP1(Enum):
 class OP2(Enum):
     ADD_1 = 'ADD_1',
     SUB_1 = 'SUB_1',
+    ADD_5 = 'ADD_5',
+    SUB_5 = 'SUB_5',
     NOP = 'NOP',
 
 class OP3(Enum):
@@ -48,6 +50,10 @@ def get_task(A,B, ops):
                 answer += 1
             elif op == OP2.SUB_1:
                 answer -= 1
+            elif op == OP2.ADD_5:
+                answer += 5
+            elif op == OP2.SUB_5:
+                answer -= 5
         elif i == 2:
             assert op == 'NOP' or type(answer) == int
             op = OP3[op]
@@ -75,7 +81,7 @@ def sample_operands(k):
     return list(zip(A, B))
 
 class Dataset():
-    def __init__(self, cfg_dict, num_examples, prompt_size, reseed=None):
+    def __init__(self, cfg_dict, num_examples, prompt_size, reseed=None, random_ans=False):
         if reseed:
             set_seed(reseed)
             self.seed = reseed
@@ -107,6 +113,7 @@ class Dataset():
         self.cfg_dict = cfg_dict
         self.num_examples = num_examples
         self.prompt_size = prompt_size
+        self.random_ans = random_ans
         self.initialize_dataset()
 
     def __getitem__(self, i):
@@ -140,9 +147,14 @@ class Dataset():
                     except:
                         pass
                 questions, answers = tuple(map(list, zip(*task_strs)))
+                if self.random_ans:
+                    shuffle(answers)
                 if len(set(answers)) == len(answers):
                     break
                 c += 1
                 if c > 1000:
                     raise Exception('Cannot find a question with unique answers per task')
             self.data.append((prompt, '\n' + questions[0] + '->', answers))
+    
+    def __repr__(self):
+        return f'Dataset({self.given_tasks}, {self.dist}, {self.num_examples}, {self.prompt_size}, {self.seed}, {self.random_ans})'

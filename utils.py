@@ -101,8 +101,7 @@ def eval_task_vectors(model, tokenizer, device, dataset, task_vecs):
 def get_task_vectors_from_dataset(model, tokenizer, device, dataset: Dataset, layers, args):
     # Get the task vectors
     task_vecs, best_layer = None, None
-    cfg_dict_str = str(dataset.cfg_dict).replace('/', '-').replace(' ', '').replace('{', '').replace('}', '').replace(':', '-').replace('\'', '')
-    save_loc = f'out/task_vectors/{args.model_id}/{dataset.seed}/{cfg_dict_str}.pt'
+    save_loc = f'out/task_vectors/{args.model_id}/{dataset.seed}/{repr(dataset)}.pt'
     if os.path.exists(save_loc) and args.use_task_vec_cache:
         print(f'Loading task vectors from {save_loc}')
         file = torch.load(save_loc)
@@ -131,7 +130,7 @@ def get_task_vectors_from_dataset(model, tokenizer, device, dataset: Dataset, la
     
     return file
 
-def get_task_vec_interpolation(model, tokenizer, device, task_vecs_A, task_vecs_B, lambs, layers, question, answers):
+def get_task_vec_interpolation(model, tokenizer, device, task_vecs_A, task_vecs_B, lambs, layers, questions, answers):
     # assert len(answers) == 2
     # plt.figure(figsize=(10, 4))
     probs_by_layer = []
@@ -141,16 +140,17 @@ def get_task_vec_interpolation(model, tokenizer, device, task_vecs_A, task_vecs_
         tv_A = task_vecs_A[patch_layer].mean(0)
         tv_B = task_vecs_B[patch_layer].mean(0)
 
-        prob_dict = [[] for _ in range(len(answers) + 1)] # probability sweep for each task and last one is "other"
+        batch_ans = list(zip(*answers))
+        prob_dict = [[] for _ in range(len(batch_ans))] # probability sweep for each task
         for lamb in lambs:
             tv_mix = (lamb * tv_B + (1-lamb) * tv_A)
             # multiply the conditional probabilities of the tokens in the string
-            for task_num, ans in enumerate(answers):
-                ans_prob = patch_get_output_prob(model, tokenizer, device, question, ans, patch_layer, tv_mix)
-                prob_dict[task_num].append(ans_prob.item())
-            prob_dict[-1].append(1 - sum([prob_dict[i][-1] for i, ans in enumerate(answers)]))
+            for task_num, ans in enumerate(batch_ans):
+                ans_prob = patch_get_output_prob(model, tokenizer, device, questions, ans, patch_layer, tv_mix)
+                prob_dict[task_num].append(ans_prob.tolist())
         probs_by_layer.append(prob_dict)
-    return probs_by_layer, lambs
+    result = torch.tensor(probs_by_layer).permute(3, 0, 1, 2) # (bz, n_layer, n_task, n_lamb)
+    return result, lambs
 
 def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, args):
     # # create mixed dataset
@@ -160,9 +160,11 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
     best_layer_2 = tv_file_2['best_layer']
     task_vecs_1 = tv_file_1['task_vecs']
     task_vecs_2 = tv_file_2['task_vecs']
+    dataset_1 = tv_file_1['dataset']
+    dataset_2 = tv_file_2['dataset']
 
     # # Interpolate between the task vectors
-    result_loc = f'out/task_vector_interpolation/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_results.pt'
+    result_loc = f'out/task_vector_interpolation/{args.model_id}/{repr(dataset_1)}_{repr(dataset_2)}_results.pt'
     lambs = torch.linspace(0, 1, 30)
     layers = list(range(min(best_layer_1, best_layer_2), max(best_layer_1, best_layer_2) + 1))
     if os.path.exists(result_loc) and args.use_results_cache:
@@ -171,13 +173,15 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
     else:
         os.makedirs(os.path.dirname(result_loc), exist_ok=True)
         result_list = []
-        for example in tqdm(dataset[:args.average_over]):
-            test_q = example[1]
-            test_ans = example[2]
+        bz = 8
+        for i in tqdm(range(0, args.average_over, bz)):
+            batch = dataset[i:i+bz]
+            test_q = [example[1] for example in batch]
+            test_ans = [example[2] for example in batch]
             result, lambs = get_task_vec_interpolation(model, tokenizer, device, task_vecs_1, task_vecs_2, lambs, layers, test_q, test_ans)
             result_list.append(result)
 
-        result = torch.tensor(result_list).mean(0)
+        result = torch.cat(result_list).mean(0)
         torch.save(result, result_loc)
 
     for i, layer in enumerate(layers):
@@ -193,12 +197,13 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         reds = sns.color_palette("crest", len(dataset.extra_tasks))
         grey = [sns.colors.crayons['Gray']]
         colors = blues + reds + grey
-        plt.stackplot(lambs, *result[i], labels=task_names, colors=colors)
+        other = 1 - result[i].sum(0)
+        plt.stackplot(lambs, *result[i], other, labels=task_names, colors=colors)
         # plt.title(title + '\nQuestion: ' + repr(question)[1:-1] + '(' + '|'.join(target_tokens) + ')')
         plt.xlabel('lambda')
         plt.ylabel('P(ans)')
-        plt.xlim(0, 1)
-        plt.ylim(0, 1)
+        # plt.xlim(0, 1)
+        # plt.ylim(0, 1)
         plt.legend()
         plt.savefig(save_loc)
 
@@ -209,11 +214,14 @@ def mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, 
     best_layer_2 = tv_file_2['best_layer']
     task_vecs_1 = tv_file_1['task_vecs']
     task_vecs_2 = tv_file_2['task_vecs']
+    dataset_1 = tv_file_1['dataset']
+    dataset_2 = tv_file_2['dataset']
     
-    mix_fracs = [0.2, 0.4, 0.6, 0.8]
+    # mix_fracs = [0.2, 0.4, 0.6, 0.8]
+    mix_fracs = [0.5]
     layers = range(model.cfg.n_layers)
 
-    result_loc = f'out/mixed_dataset_residual/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_results.pt'
+    result_loc = f'out/mixed_dataset_residual/{args.model_id}/{repr(dataset_1)}_{repr(dataset_2)}_results.pt'
     results = None
     if os.path.exists(result_loc) and args.use_results_cache:
         print(f'Loading results from {result_loc}')
@@ -226,10 +234,15 @@ def mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, 
 
         for trial in range(args.average_over):
             result_list.append([])
+            datasets = []
             for task_1_frac in mix_fracs:
                 cfg_dict = {args.task1: np.round(task_1_frac, 2), args.task2: np.round(1 - task_1_frac, 2)}
                 dataset_mixed = Dataset(cfg_dict, args.num_examples, args.prompt_size, reseed=42+trial)
-                tv_file_mixed = get_task_vectors_from_dataset(model, tokenizer, device, dataset_mixed, layers, args)
+                datasets.append(dataset_mixed)
+                dataset_random = Dataset(cfg_dict, args.num_examples, args.prompt_size, reseed=42+trial, random_ans=True)
+                datasets.append(dataset_random)
+            for ds in datasets:
+                tv_file_mixed = get_task_vectors_from_dataset(model, tokenizer, device, ds, layers, args)
                 task_vecs_mixed = tv_file_mixed['task_vecs']
                 resid_list = []
                 for layer in layers:
