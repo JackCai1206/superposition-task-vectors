@@ -239,8 +239,12 @@ def mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, 
                 cfg_dict = {args.task1: np.round(task_1_frac, 2), args.task2: np.round(1 - task_1_frac, 2)}
                 dataset_mixed = Dataset(cfg_dict, args.num_examples, args.prompt_size, reseed=42+trial)
                 datasets.append(dataset_mixed)
-                dataset_random = Dataset(cfg_dict, args.num_examples, args.prompt_size, reseed=42+trial, random_ans=True)
-                datasets.append(dataset_random)
+                dataset_rand_num = Dataset(cfg_dict, args.num_examples, args.prompt_size, reseed=42+trial, random_ans='random-numeric-answers')
+                datasets.append(dataset_rand_num)
+                dataset_shuffle = Dataset(cfg_dict, args.num_examples, args.prompt_size, reseed=42+trial, random_ans='random-answers')
+                datasets.append(dataset_shuffle)
+                dataset_rand = Dataset(cfg_dict, args.num_examples, args.prompt_size, reseed=42+trial, random_ans='random-question-answers')
+                datasets.append(dataset_rand)
             for ds in datasets:
                 tv_file_mixed = get_task_vectors_from_dataset(model, tokenizer, device, ds, layers, args)
                 task_vecs_mixed = tv_file_mixed['task_vecs']
@@ -275,13 +279,15 @@ def mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         torch.save(result, result_loc)
 
     plt.figure(figsize=(6, 4))
-    plt.title(f'Mixed dataset residual\n average over {args.average_over}')
+    plt.title(f'Mixed dataset residual {args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}\n average over {args.average_over}')
     for i, frac in enumerate(mix_fracs):
         save_loc = f'out/mixed_dataset_residual/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}.pdf'
         os.makedirs(os.path.dirname(save_loc), exist_ok=True)
-        label = f'{args.task1.split("/")[0]} frac {frac}'
-        plt.plot(layers, result[i], label=label)
-        # plt.title(title + '\nQuestion: ' + repr(question)[1:-1] + '(' + '|'.join(target_tokens) + ')')
+        label = f'frac {frac}'
+        plt.plot(layers, result[i*4], label=label, color='C'+str(i))
+        plt.plot(layers, result[i*4 + 1], label=label + f' random numeric answers', linestyle='--')    
+        plt.plot(layers, result[i*4 + 2], label=label + f' random char answers', linestyle='--')
+        plt.plot(layers, result[i*4 + 3], label=label + f' random char question & answers', linestyle='--')        
     plt.xlabel('layer')
     plt.ylabel('linear fit residual')
     plt.legend()

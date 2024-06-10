@@ -1,6 +1,7 @@
 from enum import Enum
 from functools import reduce
-from random import shuffle, sample
+from random import shuffle, sample, randint, choice
+import string
 from transformers import set_seed
 from num2words import num2words
 
@@ -28,52 +29,6 @@ class OP4(Enum):
     CAP = 'CAP',
     NOP = 'NOP'
 
-def get_task(A,B, ops):
-    assert len(ops) == 4, ops
-    question = f'{A}@{B}'
-    answer = None
-    for i, op in enumerate(ops):
-        if i == 0:
-            op = OP1[op]
-            if op == OP1.ADD:
-                answer = A+B
-            elif op == OP1.SUB:
-                answer = A-B
-            elif op == OP1.COPY_A:
-                answer = A
-            elif op == OP1.COPY_B:
-                answer = B
-        elif i == 1:
-            assert op == 'NOP' or type(answer) == int
-            op = OP2[op]
-            if op == OP2.ADD_1:
-                answer += 1
-            elif op == OP2.SUB_1:
-                answer -= 1
-            elif op == OP2.ADD_5:
-                answer += 5
-            elif op == OP2.SUB_5:
-                answer -= 5
-        elif i == 2:
-            assert op == 'NOP' or type(answer) == int
-            op = OP3[op]
-            if op == OP3.TO_ENG:
-                answer = num2words(answer, lang='en')
-            elif op == OP3.TO_SP:
-                answer = num2words(answer, lang='es')
-            elif op == OP3.TO_FR:
-                answer = num2words(answer, lang='fr')
-        elif i == 3:
-            answer = str(answer)
-            assert op == 'NOP' or not str.isdigit(answer)
-            op = OP4[op]
-            if op == OP4.TO_UPPER:
-                answer = str.upper(answer)
-            elif op == OP4.CAP:
-                answer = str.capitalize(answer)
-
-    return question, str(answer)
-
 def sample_operands(k):
     assert k <= 100
     A = sample(range(0, 100), k)
@@ -81,7 +36,7 @@ def sample_operands(k):
     return list(zip(A, B))
 
 class Dataset():
-    def __init__(self, cfg_dict, num_examples, prompt_size, reseed=None, random_ans=False):
+    def __init__(self, cfg_dict, num_examples, prompt_size, reseed=None, random_ans=None):
         if reseed:
             set_seed(reseed)
             self.seed = reseed
@@ -124,6 +79,62 @@ class Dataset():
 
     def __eq__(self, other):
         return self.data == other.data
+
+    def get_task(self, A,B, ops):
+        assert len(ops) == 4, ops
+        question = f'{A}@{B}'
+        answer = None
+        for i, op in enumerate(ops):
+            if i == 0:
+                op = OP1[op]
+                if op == OP1.ADD:
+                    answer = A+B
+                elif op == OP1.SUB:
+                    answer = A-B
+                elif op == OP1.COPY_A:
+                    answer = A
+                elif op == OP1.COPY_B:
+                    answer = B
+            elif i == 1:
+                assert op == 'NOP' or type(answer) == int
+                op = OP2[op]
+                if op == OP2.ADD_1:
+                    answer += 1
+                elif op == OP2.SUB_1:
+                    answer -= 1
+                elif op == OP2.ADD_5:
+                    answer += 5
+                elif op == OP2.SUB_5:
+                    answer -= 5
+            elif i == 2:
+                assert op == 'NOP' or type(answer) == int
+                op = OP3[op]
+                if op == OP3.TO_ENG:
+                    answer = num2words(answer, lang='en')
+                elif op == OP3.TO_SP:
+                    answer = num2words(answer, lang='es')
+                elif op == OP3.TO_FR:
+                    answer = num2words(answer, lang='fr')
+            elif i == 3:
+                answer = str(answer)
+                assert op == 'NOP' or not str.isdigit(answer)
+                op = OP4[op]
+                if op == OP4.TO_UPPER:
+                    answer = str.upper(answer)
+                elif op == OP4.CAP:
+                    answer = str.capitalize(answer)
+        
+        if self.random_ans == 'random-answers':
+            answer = ''.join([choice(string.ascii_letters) for _ in range(len(answer))])
+        elif self.random_ans == 'random-question-answers':
+            answer = ''.join([choice(string.ascii_letters) for _ in range(len(answer))])
+            question = ''.join([choice(string.ascii_letters) for _ in range(len(question))])
+        elif self.random_ans == 'random-numeric-answers':
+            answer = ''.join([choice(string.digits) for _ in range(len(answer))])
+        elif self.random_ans is not None:
+            raise Exception(f'Invalid random_ans: {self.random_ans}')
+
+        return question, str(answer)
     
     def initialize_dataset(self):
         self.data = []
@@ -134,7 +145,7 @@ class Dataset():
             shuffle(indices)
             prompt = []
             for j, operands in enumerate(sample_operands(self.prompt_size)):
-                prompt.append('->'.join(get_task(*operands, self.given_tasks[indices[j]])))
+                prompt.append('->'.join(self.get_task(*operands, self.given_tasks[indices[j]])))
             prompt = '\n'.join(prompt)
 
             c = 0
@@ -143,12 +154,10 @@ class Dataset():
                 task_strs = []
                 for task in self.all_tasks:
                     try:
-                        task_strs.append(get_task(*operands, task))
+                        task_strs.append(self.get_task(*operands, task))
                     except:
                         pass
                 questions, answers = tuple(map(list, zip(*task_strs)))
-                if self.random_ans:
-                    shuffle(answers)
                 if len(set(answers)) == len(answers):
                     break
                 c += 1

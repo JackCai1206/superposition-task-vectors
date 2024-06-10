@@ -1,5 +1,5 @@
 for model_id in "meta-llama/Llama-2-7b-hf"; do
-    python -m pdb -c continue llama_task_vectors.py \
+    python llama_task_vectors.py \
         --model_id=$model_id \
         --num_examples=100 \
         --prompt_size=100 \
@@ -7,5 +7,6 @@ for model_id in "meta-llama/Llama-2-7b-hf"; do
         --task2="COPY_B/NOP/NOP/NOP" \
         --average_over=5 \
         --do_interpolation=False \
-        --do_residual=True
+        --do_residual=True \
+        --use_task_vec_cache=True
 done
