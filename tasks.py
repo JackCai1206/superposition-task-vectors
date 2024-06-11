@@ -1,5 +1,6 @@
 from enum import Enum
 from functools import reduce
+from itertools import product
 from random import shuffle, sample, randint, choice
 import string
 from transformers import set_seed
@@ -30,13 +31,11 @@ class OP4(Enum):
     NOP = 'NOP'
 
 def sample_operands(k):
-    assert k <= 100
-    A = sample(range(0, 100), k)
-    B = sample(range(0, 100), k)
-    return list(zip(A, B))
+    AB = sample(list(product(range(100), repeat=2)), k)
+    return AB
 
 class Dataset():
-    def __init__(self, cfg_dict, num_examples, prompt_size, reseed=None, random_ans=None):
+    def __init__(self, cfg_dict, num_examples, prompt_size, reseed=None, random_ans=None, full_range_operands=False):
         if reseed:
             set_seed(reseed)
             self.seed = reseed
@@ -69,6 +68,7 @@ class Dataset():
         self.num_examples = num_examples
         self.prompt_size = prompt_size
         self.random_ans = random_ans
+        self.full_range_operands = full_range_operands
         self.initialize_dataset()
 
     def __getitem__(self, i):
@@ -79,6 +79,39 @@ class Dataset():
 
     def __eq__(self, other):
         return self.data == other.data
+
+    def sample_operands_single(self, *ops_list, full_range_operands=False):
+        A = randint(0, 100)
+        B_upper_min = 100
+        if not full_range_operands:
+            for ops in ops_list:
+                if OP1[ops[0]] == OP1.ADD:
+                    if OP2[ops[1]] == OP2.ADD_1:
+                        B_upper = 100 - A - 1
+                    elif OP2[ops[1]] == OP2.ADD_5:
+                        B_upper = 100 - A - 5
+                    elif OP2[ops[1]] == OP2.SUB_1:
+                        B_upper = A - 1
+                    elif OP2[ops[1]] == OP2.SUB_5:
+                        B_upper = A - 5
+                    else:
+                        B_upper = 100 - A
+                elif OP1[ops[0]] == OP1.SUB:
+                    if OP2[ops[1]] == OP2.SUB_1:
+                        B_upper = A - 1
+                    elif OP2[ops[1]] == OP2.SUB_5:
+                        B_upper = A - 5
+                    elif OP2[ops[1]] == OP2.ADD_1:
+                        B_upper = 100 - A + 1
+                    elif OP2[ops[1]] == OP2.ADD_5:
+                        B_upper = 100 - A + 5
+                    else:
+                        B_upper = A
+                else:
+                    B_upper = 100
+                B_upper_min = min(B_upper, B_upper_min)
+        B = randint(0, B_upper)
+        return A, B
 
     def get_task(self, A,B, ops):
         assert len(ops) == 4, ops
@@ -144,13 +177,18 @@ class Dataset():
                 indices += [0]*(self.prompt_size-len(indices))
             shuffle(indices)
             prompt = []
-            for j, operands in enumerate(sample_operands(self.prompt_size)):
-                prompt.append('->'.join(self.get_task(*operands, self.given_tasks[indices[j]])))
+            # for j, operands in enumerate(sample_operands(self.prompt_size)):
+            #     prompt.append('->'.join(self.get_task(*operands, self.given_tasks[indices[j]])))
+            for j in range(self.prompt_size):
+                oprations = self.given_tasks[indices[j]]
+                operands = self.sample_operands_single(oprations, full_range_operands=self.full_range_operands)
+                prompt.append('->'.join(self.get_task(*operands, oprations)))
             prompt = '\n'.join(prompt)
 
             c = 0
             while True:
-                operands = sample_operands(1)[0]
+                # operands = sample_operands(1)[0]
+                operands = self.sample_operands_single(*self.all_tasks, full_range_operands=self.full_range_operands)
                 task_strs = []
                 for task in self.all_tasks:
                     try:

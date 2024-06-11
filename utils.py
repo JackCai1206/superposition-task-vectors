@@ -22,7 +22,7 @@ def get_task_vecs(model: HookedTransformer, layers, dataset, tokenizer, device):
     with torch.no_grad():
         task_vecs = defaultdict(list)
         all_inputs = tokenizer(prompts, return_tensors="pt", padding='longest')
-        B = 8
+        B = 4
         for i in tqdm(range(0, len(prompts), B)):
             inputs = all_inputs.input_ids[i:i+B].to(device)
             attention_mask = all_inputs.attention_mask[i:i+B].to(device)
@@ -117,7 +117,7 @@ def get_task_vectors_from_dataset(model, tokenizer, device, dataset: Dataset, la
         best_layer = np.argmax(accs)
         print(f'Best layer for {list(dataset.cfg_dict.keys())[0]}: {best_layer}')
     else:
-        best_layer = 0
+        best_layer = None
     # Save the task vectors
     file = {
         'cfg_dict': dataset.cfg_dict,
@@ -207,18 +207,57 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         plt.legend()
         plt.savefig(save_loc)
 
+from sklearn.decomposition import PCA
+
+def task_vec_PCA_main(model, tokenizer, device, tv_file_1, tv_file_2, tv_file_3, args):
+    best_layer_1 = tv_file_1['best_layer']
+    best_layer_2 = tv_file_2['best_layer']
+    best_layer_3 = tv_file_3['best_layer']
+    layers = list(range(min(best_layer_1, best_layer_2, best_layer_3), max(best_layer_1, best_layer_2, best_layer_3) + 1))
+    cfg_dict = {args.task1: 0.5, args.task2: 0.5}
+    mixed_dataset = Dataset(cfg_dict, args.num_examples, args.prompt_size)
+    tv_file_mixed = get_task_vectors_from_dataset(model, tokenizer, device, mixed_dataset, layers, args)
+    
+    result_loc = f'out/task_vector_PCA/{args.model_id}/{repr(tv_file_1["dataset"])}_{repr(tv_file_2["dataset"])}_{repr(tv_file_3["dataset"])}_results.pt'
+    if os.path.exists(result_loc) and args.use_results_cache:
+        print(f'Loading results from {result_loc}')
+        result = torch.load(result_loc)
+    else:
+        os.makedirs(os.path.dirname(result_loc), exist_ok=True)
+        for layer in layers:
+            task_vecs_1 = tv_file_1['task_vecs'][layer]
+            task_vecs_2 = tv_file_2['task_vecs'][layer]
+            task_vecs_3 = tv_file_3['task_vecs'][layer]
+            task_vecs_mixed = tv_file_mixed['task_vecs'][layer]
+            all_tv = [task_vecs_1, task_vecs_2, task_vecs_3, task_vecs_mixed]
+            task_vecs = torch.cat(all_tv).float()
+            pca = PCA(n_components=2)
+            pca.fit(task_vecs)
+            result = np.stack([pca.transform(tv.float()) for tv in all_tv])
+            torch.save(result, result_loc)
+            
+    save_loc = f'out/task_vector_PCA/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_{args.task3.replace("/", "-")}.pdf'
+    os.makedirs(os.path.dirname(save_loc), exist_ok=True)
+    plt.figure(figsize=(6, 5))
+    plt.title(f'{args.task1} to {args.task2} to {args.task3}\n average over {args.average_over} examples')
+    for i, (task_vecs, label) in enumerate(zip(result, [args.task1, args.task2, args.task3, 'mixed-task-1&2'])):
+        plt.scatter(task_vecs[:, 0], task_vecs[:, 1], label=label)
+    plt.xlabel('PCA 1')
+    plt.ylabel('PCA 2')
+    plt.legend()
+    plt.savefig(save_loc)
+
+
 from sklearn.linear_model import LinearRegression
 
 def mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, args):
-    best_layer_1 = tv_file_1['best_layer']
-    best_layer_2 = tv_file_2['best_layer']
     task_vecs_1 = tv_file_1['task_vecs']
     task_vecs_2 = tv_file_2['task_vecs']
     dataset_1 = tv_file_1['dataset']
     dataset_2 = tv_file_2['dataset']
     
-    # mix_fracs = [0.2, 0.4, 0.6, 0.8]
-    mix_fracs = [0.5]
+    mix_fracs = [0.2, 0.4, 0.6, 0.8]
+    # mix_fracs = [0.5]
     layers = range(model.cfg.n_layers)
 
     result_loc = f'out/mixed_dataset_residual/{args.model_id}/{repr(dataset_1)}_{repr(dataset_2)}_results.pt'
@@ -285,9 +324,9 @@ def mixed_dataset_residual_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         os.makedirs(os.path.dirname(save_loc), exist_ok=True)
         label = f'frac {frac}'
         plt.plot(layers, result[i*4], label=label, color='C'+str(i))
-        plt.plot(layers, result[i*4 + 1], label=label + f' random numeric answers', linestyle='--')    
-        plt.plot(layers, result[i*4 + 2], label=label + f' random char answers', linestyle='--')
-        plt.plot(layers, result[i*4 + 3], label=label + f' random char question & answers', linestyle='--')        
+        plt.plot(layers, result[i*4 + 1], label=label + f' random numeric answers', linestyle='--', color='C'+str(i))    
+        plt.plot(layers, result[i*4 + 2], label=label + f' random char answers', linestyle='--', color='C'+str(i))
+        plt.plot(layers, result[i*4 + 3], label=label + f' random char question & answers', linestyle='--', color='C'+str(i))        
     plt.xlabel('layer')
     plt.ylabel('linear fit residual')
     plt.legend()
