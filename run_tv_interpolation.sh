@@ -14,9 +14,9 @@ set -e
         # "COPY_A/NOP/TO_DE/NOP" "COPY_A/NOP/TO_IT/NOP" "COPY_A/NOP/TO_FR/NOP"  1 60 "to_de(op1)" "to_it(op1)" "to_fr(op1)" \
 for model_id in "meta-llama/Meta-Llama-3-8B"; do
     for opA opB opC num_operands prompt_size opA_alias opB_alias opC_alias in \
-        "COPY_A/NOP/TO_DE/NOP" "COPY_A/NOP/TO_IT/NOP" "COPY_A/NOP/TO_FR/NOP"  1 60 "to_de(op1)" "to_it(op1)" "to_fr(op1)" \
+        "COPY_A/SUB_1/NOP/NOP" "COPY_B/NOP/NOP/NOP" "COPY_C/SUB_5/NOP/NOP" 3 30 "op1-1" "copy(op2)" "op3-5" \
     ; do
-        CUDA_VISIBLE_DEVICES=1 PYTHONHASHSEED=0 python llama_task_vectors.py \
+        CUDA_VISIBLE_DEVICES=1 PYTHONHASHSEED=0 python -m pdb llama_task_vectors.py \
             --model_id=$model_id \
             --num_examples=100 \
             --prompt_size=$prompt_size \
@@ -29,7 +29,7 @@ for model_id in "meta-llama/Meta-Llama-3-8B"; do
             --average_over=2 \
             --do_interpolation=True \
             --use_task_vec_cache=True \
-            --use_results_cache=False \
+            --use_results_cache=True \
             --num_operands=$num_operands \
             --out_dir='out_paper_figures'
     done

@@ -245,18 +245,20 @@ class Dataset():
     def __hash__(self):
         return hash(tuple(self.data))
     
+    simple_name_mapping = {
+        "COPY_A/NOP/NOP/NOP": "copy(op1)",
+        "COPY_B/NOP/NOP/NOP": "copy(op2)",
+        "ADD/NOP/NOP/NOP": "op1 + op2",
+        "COPY_A/SUB_1/NOP/NOP": "op1 - 1",
+        "COPY_B/SUB_1/NOP/NOP": "op2 - 1",
+        "COPY_B/NOP/NOP/NOP": "copy(op2)",
+        "COPY_C/SUB_5/NOP/NOP": "op3 - 5",
+        "COPY_A/NOP/TO_FR/NOP": "to_fr(op1)",
+        "COPY_A/NOP/TO_DE/NOP": "to_de(op1)",
+        "COPY_A/NOP/TO_IT/NOP": "to_it(op1)"
+    }
+    
     def get_simple_name(self):
-        mapping = {
-            "COPY_A/NOP/NOP/NOP": "copy(op1)",
-            "COPY_B/NOP/NOP/NOP": "copy(op2)",
-            "ADD/NOP/NOP/NOP": "op1 + op2",
-            "COPY_A/SUB_1/NOP/NOP": "op1 - 1",
-            "COPY_B/NOP/NOP/NOP": "copy(op2)",
-            "COPY_C/SUB_5/NOP/NOP": "op3 - 5",
-            "COPY_A/NOP/TO_FR/NOP": "to_fr(op1)",
-            "COPY_A/NOP/TO_DE/NOP": "to_de(op1)",
-            "COPY_A/NOP/TO_IT/NOP": "to_it(op1)"
-        }
         if len(self.dist) == 1:
-            return mapping['/'.join(self.given_tasks[0])]
+            return self.simple_name_mapping['/'.join(self.given_tasks[0])]
         return '/'.join([f'{d:.2f}' for d in self.dist])

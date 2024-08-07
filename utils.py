@@ -69,7 +69,7 @@ def align_sentences(sent, sep_id, pad_id):
 
     return aligned_ids, attention_mask, sep_pos
 
-def patch_get_output_prob(model, tokenizer, device, question, ans, patch=True, patch_layer=None, tv_mix=None):
+def patch_get_output_prob(model, tokenizer, device, question, ans, patch=True, patch_layer=None, tv_mix=None, return_pred=False):
     if type(question) == str:
         question = [question]
     inputs = tokenizer([q+a for q,a in zip(question, ans)], return_tensors="pt", padding=True)
@@ -80,8 +80,11 @@ def patch_get_output_prob(model, tokenizer, device, question, ans, patch=True, p
         else:
             output = model(input_ids.to(device), attention_mask=attention_mask.to(device), return_type='logits').cpu().detach()
     probs = output.softmax(dim=-1)
+    pred = tokenizer.batch_decode(torch.argmax(probs[:, sep_pos:-1], dim=-1))
     probs[..., tokenizer.pad_token_id] = 1
     ans_prob = torch.gather(probs[:, sep_pos:-1], -1, input_ids[:, sep_pos+1:].unsqueeze(-1)).squeeze(-1).prod(dim=-1)
+    if return_pred:
+        return ans_prob, pred
     return ans_prob
 
 def collate(batch):
@@ -89,14 +92,15 @@ def collate(batch):
     answers = list(zip(*answers)) # (n_task, Bz)
     return prompt, question, answers
 
-def eval_task_vectors(model, tokenizer, device, dataset, task_vecs):
+def eval_task_vectors(model, tokenizer, device, dataset, task_vecs, use_prob=True):
     print('Evaluating task vectors')
     acc_A = []
+    prob_A = []
     layers = range(model.cfg.n_layers)
     for patch_layer in tqdm(layers):
         tv_A = task_vecs[patch_layer].mean(0)
         # tv_A = task_vecs[layer][:, -1, :][0]
-        # num_correct = 0
+        num_correct = 0
         ans_probs = []
         with torch.no_grad():
             B = 100 # Bz 1 will max out the GPU memory
@@ -104,12 +108,16 @@ def eval_task_vectors(model, tokenizer, device, dataset, task_vecs):
                 prompt, question, answers = collate(dataset[i:i+B])
                 assert len(answers) == 1
                 ans = answers[0]
-                ans_prob = patch_get_output_prob(model, tokenizer, device, question, ans, patch=True, patch_layer=patch_layer, tv_mix=tv_A)
+                ans_prob, pred = patch_get_output_prob(model, tokenizer, device, question, ans, patch=True, patch_layer=patch_layer, tv_mix=tv_A, return_pred=True)
                 ans_probs += ans_prob.tolist()
-        # acc_A.append(num_correct / len(eval_prompts))
-        acc_A.append(sum(ans_probs) / len(ans_probs))
+                num_correct += sum([a == p for a, p in zip(ans, pred)])
+        acc_A.append(num_correct / len(dataset))
+        prob_A.append(sum(ans_probs) / len(dataset))
     # breakpoint()
-    return acc_A
+    if use_prob:
+        return prob_A
+    else:
+        return acc_A
 
 def get_task_vectors_from_dataset(model, tokenizer, device, dataset: Dataset, layers, args):
     # Get the task vectors
@@ -120,7 +128,7 @@ def get_task_vectors_from_dataset(model, tokenizer, device, dataset: Dataset, la
         file = torch.load(save_loc)
         if all([l in file['task_vecs'] for l in layers]) and file['dataset'] == dataset:
             # task_vecs = file['task_vecs']
-            # accs = eval_task_vectors(model, tokenizer, device, dataset, task_vecs)
+            # accs = eval_task_vectors(model, tokenizer, device, dataset, task_vecs, use_prob=False)
             # print(accs)
             # best_layer = np.argmax(accs)
             # print(f'Best layer for {list(dataset.cfg_dict.keys())[0]}: {best_layer}')
@@ -197,9 +205,9 @@ def get_task_vec_interpolation_v2(model, tokenizer, device, task_vecs_A, task_ve
     return result, lambs
 
 def get_task_mixing(model, tokenizer, device, task1, task2, task3, lambs, layers, args):
-    num_tasks = 2 # hardcode for now, return the first two tasks
+    num_tasks = 9 # hardcode for now, return the first two tasks
     bz = 8
-    prob_dict = torch.zeros(args.num_examples, 4, len(lambs)) # probability sweep for each task
+    prob_dict = torch.zeros(args.num_examples, 9, len(lambs)) # probability sweep for each task
 
     initial_dist = torch.tensor([1, 0, 0])
     final_dist = torch.tensor([0, 1, 0])
@@ -237,7 +245,7 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
     result_loc = f'{args.out_dir}/task_vector_interpolation/{args.model_id}/{get_args_hash(args)}_results.pt'
     lambs = torch.linspace(0, 1, 30)
     lambs2 = torch.linspace(0, 1, 9)
-    layers = list(range(min(best_layer_1, best_layer_2, best_layer_3), max(best_layer_1, best_layer_2, best_layer_3) + 1))
+    layers = list(range(min(best_layer_1, best_layer_2, best_layer_3)-3, max(best_layer_1, best_layer_2, best_layer_3) + 3))
     if os.path.exists(result_loc) and args.use_results_cache:
         print(f'Loading results from {result_loc}')
         result = torch.load(result_loc)
@@ -246,7 +254,7 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         os.makedirs(os.path.dirname(result_loc), exist_ok=True)
         result_list = []
         bz = 8
-        for i in tqdm(range(0, args.average_over, bz)):
+        for i in tqdm(range(0, args.average_over + 1, bz)):
             batch = dataset[i:i+bz]
             test_q = [example[1] for example in batch]
             test_ans = [example[2] for example in batch]
@@ -262,15 +270,17 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
     for i, layer in enumerate(layers):
         save_loc = f'{args.out_dir}/task_vector_interpolation/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_{args.task3.replace("/", "-")}/layer-{layer}.pdf'
         os.makedirs(os.path.dirname(save_loc), exist_ok=True)
-        fig = plt.figure(figsize=(4.2, 4.2))
+        fig = plt.figure(figsize=(8.5, 3.25))
         # plt.title(f'{args.task1} to {args.task2}\n average over {args.average_over} examples\nLayer {layer}')
-        task_names = dataset.given_tasks[:2] + ['other']
-        if args.task1_alias:
-            task_names[0] = args.task1_alias
-        if args.task2_alias:
-            task_names[1] = args.task2_alias
+        task_names = dataset.given_tasks[:2] + dataset.extra_tasks[1:3]
+        # if args.task1_alias:
+        #     task_names[0] = args.task1_alias
+        # if args.task2_alias:
+        #     task_names[1] = args.task2_alias
         # if args.task3_alias:
         #     task_names[2] = args.task3_alias
+        task_names = [dataset.simple_name_mapping['/'.join(t)] for t in task_names] + ['other']
+        
         # for task_num, prob_list in enumerate(result[i]):
         #     label = task_names[task_num]
         #     plt.plot(lambs, prob_list, label=label)
@@ -278,24 +288,24 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         # reds = sns.color_palette("crest", len(dataset.extra_tasks))
         # grey = [sns.colors.crayons['Gray']]
         # colors = blues + reds + grey
-        colors = sns.color_palette('crest', 2) + [sns.colors.xkcd_rgb['light grey blue']]
-        other = 1 - result['interpolation'][i][:2].sum(0)
-        ax1 = fig.add_subplot(2, 1, 1)
-        ax1.stackplot(lambs, *result['interpolation'][i][:2], other, labels=task_names, colors=colors)
-        other = 1 - result['task_mixing'].sum(0)
+        colors = sns.color_palette('crest', 2) + sns.color_palette('flare', 2) + [sns.colors.xkcd_rgb['light grey blue']]
+        other = 1 - result['interpolation'][i][:2].sum(0) - result['interpolation'][i][3:5].sum(0)
+        ax1 = fig.add_subplot(1, 2, 1)
+        ax1.stackplot(lambs, *result['interpolation'][i][:2], *result['interpolation'][i][3:5], other, labels=task_names, colors=colors)
+        other = 1 - result['task_mixing'][:2].sum(0) - result['task_mixing'][3:5].sum(0)
         # ax1.set_xlabel('lambda')
         ax1.set_ylabel('P(ans)')
         ax1.set_xlim(0, 1)
         ax1.set_ylim(0, 1)
         ax1.set_xticks([])
-        ax2 = fig.add_subplot(2, 1, 2, sharex=ax1)
-        ax2.stackplot(lambs2, *result['task_mixing'][:2], other, colors=colors, linestyle='--')
+        ax2 = fig.add_subplot(1, 2, 2, sharex=ax1)
+        ax2.stackplot(lambs2, *result['task_mixing'][:2], result['task_mixing'][3:5], other, colors=colors, linestyle='--')
         ax2.set_xlabel('lambda')
         ax2.set_ylabel('P(ans)')
         ax2.set_xlim(0, 1)
         ax2.set_ylim(0, 1)
-        ax2.set_xticks([0, 0.25, 0.5, 0.75, 1])
-        ax1.legend(bbox_to_anchor=(0., 1.05, 1., .105), loc='lower left', mode='expand', ncol=len(task_names), borderaxespad=0.)
+        # ax2.set_xticks([0, 0.25, 0.5, 0.75, 1])
+        fig.legend(bbox_to_anchor=(0., 1.05, 1., .105), loc='lower left', ncol=5)
         fig.set_layout_engine('tight')
         fig.subplots_adjust(hspace=0.05)
         plt.savefig(save_loc)

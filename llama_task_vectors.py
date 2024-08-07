@@ -33,7 +33,7 @@ class ScriptArguments:
     out_dir: str = 'out'
 
 if __name__ == '__main__':
-    set_seed(42)
+    set_seed(44)
     
     args: ScriptArguments = HfArgumentParser((ScriptArguments)).parse_args()
 
