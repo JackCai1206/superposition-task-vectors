@@ -270,7 +270,7 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
     for i, layer in enumerate(layers):
         save_loc = f'{args.out_dir}/task_vector_interpolation/{args.model_id}/{args.task1.replace("/", "-")}_{args.task2.replace("/", "-")}_{args.task3.replace("/", "-")}/layer-{layer}.pdf'
         os.makedirs(os.path.dirname(save_loc), exist_ok=True)
-        fig = plt.figure(figsize=(8.5, 3.25))
+        fig = plt.figure(figsize=(4.2, 4.2))
         # plt.title(f'{args.task1} to {args.task2}\n average over {args.average_over} examples\nLayer {layer}')
         task_names = dataset.given_tasks[:2] + dataset.extra_tasks[1:3]
         # if args.task1_alias:
@@ -290,7 +290,7 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         # colors = blues + reds + grey
         colors = sns.color_palette('crest', 2) + sns.color_palette('flare', 2) + [sns.colors.xkcd_rgb['light grey blue']]
         other = 1 - result['interpolation'][i][:2].sum(0) - result['interpolation'][i][3:5].sum(0)
-        ax1 = fig.add_subplot(1, 2, 1)
+        ax1 = fig.add_subplot(2, 1, 1)
         ax1.stackplot(lambs, *result['interpolation'][i][:2], *result['interpolation'][i][3:5], other, labels=task_names, colors=colors)
         other = 1 - result['task_mixing'][:2].sum(0) - result['task_mixing'][3:5].sum(0)
         # ax1.set_xlabel('lambda')
@@ -298,16 +298,16 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         ax1.set_xlim(0, 1)
         ax1.set_ylim(0, 1)
         ax1.set_xticks([])
-        ax2 = fig.add_subplot(1, 2, 2, sharex=ax1)
+        ax2 = fig.add_subplot(2, 1, 2, sharex=ax1)
         ax2.stackplot(lambs2, *result['task_mixing'][:2], result['task_mixing'][3:5], other, colors=colors, linestyle='--')
         ax2.set_xlabel('lambda')
         ax2.set_ylabel('P(ans)')
         ax2.set_xlim(0, 1)
         ax2.set_ylim(0, 1)
-        # ax2.set_xticks([0, 0.25, 0.5, 0.75, 1])
-        fig.legend(bbox_to_anchor=(0., 1.05, 1., .105), loc='lower left', ncol=5)
+        ax2.set_xticks([0, 0.25, 0.5, 0.75, 1])
+        ax1.legend(bbox_to_anchor=(0., 1.05, 1., .105), loc='lower left', mode='expand', ncol=2, borderaxespad=0.)
         fig.set_layout_engine('tight')
-        fig.subplots_adjust(hspace=0.05)
+        fig.subplots_adjust(hspace=0.03)
         plt.savefig(save_loc)
 
 from sklearn.decomposition import PCA
