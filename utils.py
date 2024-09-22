@@ -244,8 +244,8 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
     # # Interpolate between the task vectors
     result_loc = f'{args.out_dir}/task_vector_interpolation/{args.model_id}/{get_args_hash(args)}_results.pt'
     lambs = torch.linspace(0, 1, 30)
-    lambs2 = torch.linspace(0, 1, 9)
-    layers = list(range(min(best_layer_1, best_layer_2, best_layer_3)-3, max(best_layer_1, best_layer_2, best_layer_3) + 3))
+    lambs2 = torch.linspace(0, 1, 5)
+    layers = list(range(min(best_layer_1, best_layer_2, best_layer_3), max(best_layer_1, best_layer_2, best_layer_3) + 1))
     if os.path.exists(result_loc) and args.use_results_cache:
         print(f'Loading results from {result_loc}')
         result = torch.load(result_loc)
@@ -288,18 +288,41 @@ def task_vec_interpolation_main(model, tokenizer, device, tv_file_1, tv_file_2, 
         # reds = sns.color_palette("crest", len(dataset.extra_tasks))
         # grey = [sns.colors.crayons['Gray']]
         # colors = blues + reds + grey
-        colors = sns.color_palette('crest', 2) + sns.color_palette('flare', 2) + [sns.colors.xkcd_rgb['light grey blue']]
-        other = 1 - result['interpolation'][i][:2].sum(0) - result['interpolation'][i][3:5].sum(0)
+
+        # colors = sns.color_palette('crest', 2) + sns.color_palette('flare', 2) + [sns.colors.xkcd_rgb['light grey blue']]
+        # other = 1 - result['interpolation'][i][:2].sum(0) - result['interpolation'][i][3:5].sum(0)
+        # ax1 = fig.add_subplot(2, 1, 1)
+        # ax1.stackplot(lambs, *result['interpolation'][i][:2], *result['interpolation'][i][3:5], other, labels=task_names, colors=colors)
+        # other = 1 - result['task_mixing'][:2].sum(0) - result['task_mixing'][3:5].sum(0)
+        # # ax1.set_xlabel('lambda')
+        # ax1.set_ylabel('P(ans)')
+        # ax1.set_xlim(0, 1)
+        # ax1.set_ylim(0, 1)
+        # ax1.set_xticks([])
+        # ax2 = fig.add_subplot(2, 1, 2, sharex=ax1)
+        # ax2.stackplot(lambs2, *result['task_mixing'][:2], result['task_mixing'][3:5], other, colors=colors, linestyle='--')
+        # ax2.set_xlabel('lambda')
+        # ax2.set_ylabel('P(ans)')
+        # ax2.set_xlim(0, 1)
+        # ax2.set_ylim(0, 1)
+        # ax2.set_xticks([0, 0.25, 0.5, 0.75, 1])
+        # ax1.legend(bbox_to_anchor=(0., 1.05, 1., .105), loc='lower left', mode='expand', ncol=2, borderaxespad=0.)
+        # fig.set_layout_engine('tight')
+        # fig.subplots_adjust(hspace=0.03)
+        # plt.savefig(save_loc)
+
+        colors = sns.color_palette('crest', 2) + [sns.colors.xkcd_rgb['light grey blue']]
+        other = 1 - result['interpolation'][i][:2].sum(0)
         ax1 = fig.add_subplot(2, 1, 1)
-        ax1.stackplot(lambs, *result['interpolation'][i][:2], *result['interpolation'][i][3:5], other, labels=task_names, colors=colors)
-        other = 1 - result['task_mixing'][:2].sum(0) - result['task_mixing'][3:5].sum(0)
+        ax1.stackplot(lambs, *result['interpolation'][i][:2], other, labels=task_names, colors=colors)
+        other = 1 - result['task_mixing'][:2].sum(0)
         # ax1.set_xlabel('lambda')
         ax1.set_ylabel('P(ans)')
         ax1.set_xlim(0, 1)
         ax1.set_ylim(0, 1)
         ax1.set_xticks([])
         ax2 = fig.add_subplot(2, 1, 2, sharex=ax1)
-        ax2.stackplot(lambs2, *result['task_mixing'][:2], result['task_mixing'][3:5], other, colors=colors, linestyle='--')
+        ax2.stackplot(lambs2, *result['task_mixing'][:2], other, colors=colors, linestyle='--')
         ax2.set_xlabel('lambda')
         ax2.set_ylabel('P(ans)')
         ax2.set_xlim(0, 1)
