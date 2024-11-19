@@ -492,7 +492,7 @@ def task_vec_PCA_main(tv_files, args=None):
     all_tv_files = tv_files + tv_file_mixed_list
 
     # Compute PCA/LDA results
-    method = 'LDA'
+    method = args.dim_reduc_method
     result_loc = f'{args.out_dir}/task_vector_{method}/{args.model_id}/{get_args_hash(args)}_results.pt'
 
     if os.path.exists(result_loc) and args.use_results_cache:

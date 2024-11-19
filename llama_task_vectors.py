@@ -37,6 +37,7 @@ class ScriptArguments:
     separator: str = '->'
     fit_PCA_all_classes: bool = False
     use_alt_dataset_impl: bool = False
+    dim_reduc_method: str = 'LDA'
     
     def __post_init__(self):
         self.layers = list(range(*self.layers)) if self.layers else None
