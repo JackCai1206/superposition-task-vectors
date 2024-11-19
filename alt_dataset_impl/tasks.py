@@ -422,13 +422,20 @@ def question_add_translate(examples: List[str], tokenizer: AutoTokenizer, low : 
                 gt_lst.append(translated)
             return f"{A}{symbol}{B}{symbol2}", gt_lst
 
-def question_country1(examples: List[str], tokenizer: AutoTokenizer, symbol2='->') -> Tuple:
+def question_country1(examples: List[str], tokenizer: AutoTokenizer, symbol2='->', ans_set=set()) -> Tuple:
     while True:
         country = random.choice(list(country_capital_dict.keys()))
         if country not in "\n".join(examples):
             capital = country_capital_dict[country]
             continent = country_continent_dict[country]
             upper = country.upper()
+            ans = []
+            if 'country_capital' in ans_set:
+                ans.append(capital)
+            if 'country_continent' in ans_set:
+                ans.append(continent)
+            if 'country_upper' in ans_set:
+                ans.append(upper)
             return f"{country}{symbol2}", [capital, continent, upper]
 
 def question_country2(examples: List[str], tokenizer: AutoTokenizer, symbol2='->') -> Tuple:

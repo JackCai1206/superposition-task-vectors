@@ -54,6 +54,8 @@ class OP4(Enum):
 
 def get_task_func_dict(cfg_dict):
     task_funcs_dict = {}
+    question_dict = None
+    answer_set = set()
     for i, task in enumerate(cfg_dict.keys()):
         task = tuple(task.split('/'))
         if OP1[task[0]] in {OP1.CAPITAL, OP1.CONTINENT, OP1.CAPITALIZE}:
@@ -63,12 +65,16 @@ def get_task_func_dict(cfg_dict):
                     'symbol2': '->'
                 }
             }
-            question_dict = {
-                'name': 'country1',
-                'kwargs': {
-                    'symbol2': '->'
+            if question_dict is None:
+                question_dict = {
+                    'name': 'country1',
+                    'kwargs': {
+                        'symbol2': '->',
+                        'ans_set': set((OP1[task[0]].value[0], ))
+                    }
                 }
-            }
+            else:
+                question_dict['kwargs']['ans_set'].add(OP1[task[0]].value[0])
         elif OP1[task[0]] in {OP1.ADD}:
             task_funcs_dict[i] = {
                 'name': 'APlusB_t',
