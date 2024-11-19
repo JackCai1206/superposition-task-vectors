@@ -8,6 +8,8 @@ from transformers import set_seed
 from num2words import num2words
 import torch
 from hashlib import sha256
+from alt_dataset_impl.generate_prompt import generate_prompt, PromptConfig, parse_raw_config_for_prompt
+import yaml
 
 continents = torch.load('country_continent_dict.pt', weights_only=True)
 capitals = torch.load('country_capital_dict.pt', weights_only=True)
@@ -18,9 +20,9 @@ class OP1(Enum):
     COPY_A = 'COPY_A',
     COPY_B = 'COPY_B',
     COPY_C = 'COPY_C',
-    CAPITAL = 'CAPITAL',
-    CONTINENT = 'CONTINENT',
-    CAPITALIZE = 'CAPITALIZE',
+    CAPITAL = 'country_capital',
+    CONTINENT = 'country_continent',
+    CAPITALIZE = 'country_upper',
 
     locals().update({
         f'COPY_LETTER_{i}': f'COPY_LETTER_{i}' for i in range(1, 9)
@@ -37,12 +39,12 @@ class OP2(Enum):
     NOP = 'NOP',
 
 class OP3(Enum):
-    TO_ENG = 'TO_ENG',
-    TO_ES = 'TO_ES',
-    TO_FR = 'TO_FR',
-    TO_DE = 'TO_DE',
-    TO_IT = 'TO_IT',
-    TO_RU = 'TO_RU',
+    TO_ENG = 'en',
+    TO_ES = 'es',
+    TO_FR = 'fr',
+    TO_DE = 'de',
+    TO_IT = 'it',
+    TO_RU = 'ru',
     NOP = 'NOP',
 
 class OP4(Enum):
@@ -50,15 +52,55 @@ class OP4(Enum):
     CAP = 'CAP',
     NOP = 'NOP'
 
+def get_task_func_dict(cfg_dict):
+    task_funcs_dict = {}
+    for i, task in enumerate(cfg_dict.keys()):
+        task = tuple(task.split('/'))
+        if OP1[task[0]] in {OP1.CAPITAL, OP1.CONTINENT, OP1.CAPITALIZE}:
+            task_funcs_dict[i] = {
+                'name': OP1[task[0]].value[0],
+                'kwargs': {
+                    'symbol2': '->'
+                }
+            }
+            question_dict = {
+                'name': 'country1',
+                'kwargs': {
+                    'symbol2': '->'
+                }
+            }
+        elif OP1[task[0]] in {OP1.ADD}:
+            task_funcs_dict[i] = {
+                'name': 'APlusB_t',
+                'kwargs': {
+                    'low': 10,
+                    'high': 100,
+                    'language': OP2[task[2]].value[0],
+                    'symbol': '+',
+                    'symbol2': '->'
+                }
+            }
+            question_dict = {
+                'name': 'add_translate',
+                'kwargs': {
+                    'low': 10,
+                    'high': 100,
+                    'lang_list': [OP2[t[2]].value for t in cfg_dict.keys()],
+                    'symbol': '+',
+                    'symbol2': '->'
+                }
+            }
+    return task_funcs_dict, question_dict
+
 class Dataset():
     def __init__(self, cfg_dict, num_examples, prompt_size, args, reseed=None, random_ans=None):
-        if reseed:
+        if reseed is not None:
             set_seed(reseed)
             self.seed = reseed
         else:
             set_seed(42)
             self.seed = 42
-
+        
         self.dist = list(cfg_dict.values())
         assert sum(self.dist) == 1, f'Sum of distribution is not 1: {sum(self.dist)}'
         self.given_tasks = list(cfg_dict.keys())
@@ -88,7 +130,11 @@ class Dataset():
         self.random_ans = random_ans
         self.full_range_operands = args.full_range_operands
         self.num_operands = args.num_operands
-        self.initialize_dataset()
+        
+        if args.use_alt_dataset_impl:
+            self.initialize_dataset_alt()
+        else:
+            self.initialize_dataset()
 
     def __getitem__(self, i):
         return self.data[i]
@@ -99,7 +145,7 @@ class Dataset():
     def __eq__(self, other):
         return self.data == other.data
     
-    def sample_operands(self, k, ops_list, num_operands=2, range_operands=(0, 100)):
+    def sample_operands(self, k, ops_list, num_operands=2):
         if OP1[ops_list[0][0]] in {OP1.CAPITAL, OP1.CONTINENT, OP1.CAPITALIZE}:
             # The input is a country
             sample_range = list(capitals.keys())
@@ -111,7 +157,7 @@ class Dataset():
             sample_range = range(0, 10)
         else:
             # The input is a number
-            sample_range = range(*range_operands)
+            sample_range = range(10, 100)
         AB = [sample(sample_range, k=num_operands) for _ in range(k)]
         return AB
     
@@ -256,12 +302,12 @@ class Dataset():
 
             c = 0
             while True:
-                if any([OP3[task[2]] in {OP3.TO_FR, OP3.TO_DE, OP3.TO_IT, OP3.TO_RU} for task in self.all_tasks]):
-                    range_operands = (0, 10)
-                else:
-                    range_operands = (0, 100)
+                # if any([OP3[task[2]] in {OP3.TO_FR, OP3.TO_DE, OP3.TO_IT, OP3.TO_RU} for task in self.all_tasks]):
+                #     range_operands = (0, 10)
+                # else:
+                #     range_operands = (0, 100)
                 if self.full_range_operands:
-                    operands = self.sample_operands(1, self.all_tasks, num_operands=self.num_operands, range_operands=range_operands)[0]
+                    operands = self.sample_operands(1, self.all_tasks, num_operands=self.num_operands)[0]
                 else:
                     operands = self.sample_operands_single(*self.all_tasks)
                 task_strs = []
@@ -278,6 +324,38 @@ class Dataset():
                     raise Exception('Cannot find a question with unique answers per task')
             self.data.append((prompt, '\n' + questions[0] + self.separator, tuple(answers)))
     
+    def initialize_dataset_alt(self):
+        self.data = []
+        task_funcs_dict, question_dict = get_task_func_dict(self.cfg_dict)
+        prompt_cfg = parse_raw_config_for_prompt({
+            'num_exper': self.num_examples,
+            'num_examples': self.prompt_size,
+            'num_tasks': len(self.cfg_dict),
+            'num_tokens': 0,
+            'task_funcs_dict': task_funcs_dict,
+            'question': question_dict,
+            'distribution': list(self.cfg_dict.values()),
+            'order': 'random',
+            'prompt_template_name': 'standard',
+            'device': 'cuda:0',
+            'seed': self.seed,
+            # 'model_aliases': [
+            #     'Meta-Llama-3-70B',
+            #     'gpt-3.5-turbo-instruct',
+            #     'Qwen1.5-72B'
+            # ],
+            # 'pretrained_dir': True,
+            # 'dir_name': 'country1',
+            # 'model_kwargs': None
+            "max_tokens": 0,
+            "num_beams": 1
+        })
+        for i in range(self.num_examples):
+            prompt_question, output_choices = generate_prompt(prompt_cfg, None)
+            prompt, question = prompt_question.rsplit('\n', 1)
+            question = '\n' + question
+            self.data.append((prompt, question, tuple(output_choices)))
+
     def __repr__(self):
         sorted_given_tasks, sorted_dist = tuple(zip(*sorted(list(self.cfg_dict.items()))))
         return f'Dataset({list(sorted_given_tasks)}, {list(sorted_dist)}, {self.num_examples}, {self.prompt_size}, {self.seed}, {self.random_ans}, {self.full_range_operands}, {self.num_operands})'

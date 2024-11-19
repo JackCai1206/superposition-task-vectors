@@ -36,6 +36,7 @@ class ScriptArguments:
     layers: List[int] = None
     separator: str = '->'
     fit_PCA_all_classes: bool = False
+    use_alt_dataset_impl: bool = False
     
     def __post_init__(self):
         self.layers = list(range(*self.layers)) if self.layers else None
@@ -50,18 +51,18 @@ if __name__ == '__main__':
     # model_id = "meta-llama/Meta-Llama-3-8B"
     # model_id = 'Qwen/Qwen1.5-7B'
 
-    dataset_1 = Dataset({args.task1: 1}, args.num_examples, args.prompt_size, args, reseed=42)
+    dataset_1 = Dataset({args.task1: 1}, args.num_examples, args.prompt_size, args, reseed=0)
     tv_file_1 = get_task_vectors_from_dataset(dataset_1, args)
 
-    dataset_2 = Dataset({args.task2: 1}, args.num_examples, args.prompt_size, args, reseed=42)
+    dataset_2 = Dataset({args.task2: 1}, args.num_examples, args.prompt_size, args, reseed=0)
     tv_file_2 = get_task_vectors_from_dataset(dataset_2, args)
-    
+
     if args.task3:
-        dataset_3 = Dataset({args.task3: 1}, args.num_examples, args.prompt_size, args, reseed=42)
+        dataset_3 = Dataset({args.task3: 1}, args.num_examples, args.prompt_size, args, reseed=0)
         tv_file_3 = get_task_vectors_from_dataset(dataset_3, args)
 
     if args.task4:
-        dataset_4 = Dataset({args.task4: 1}, args.num_examples, args.prompt_size, args, reseed=42)
+        dataset_4 = Dataset({args.task4: 1}, args.num_examples, args.prompt_size, args, reseed=0)
         tv_file_4 = get_task_vectors_from_dataset(dataset_4, args)
 
     # Interpolate between the task vectors
