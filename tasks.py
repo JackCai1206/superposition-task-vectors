@@ -360,7 +360,6 @@ class Dataset():
             prompt, question = prompt_question.rsplit('\n', 1)
             question = '\n' + question
             self.data.append((prompt, question, tuple(output_choices)))
-            breakpoint()
 
     def __repr__(self):
         sorted_given_tasks, sorted_dist = tuple(zip(*sorted(list(self.cfg_dict.items()))))
