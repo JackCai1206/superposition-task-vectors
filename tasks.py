@@ -55,7 +55,6 @@ class OP4(Enum):
 def get_task_func_dict(cfg_dict):
     task_funcs_dict = {}
     question_dict = None
-    answer_set = set()
     for i, task in enumerate(cfg_dict.keys()):
         task = tuple(task.split('/'))
         if OP1[task[0]] in {OP1.CAPITAL, OP1.CONTINENT, OP1.CAPITALIZE}:
@@ -361,6 +360,7 @@ class Dataset():
             prompt, question = prompt_question.rsplit('\n', 1)
             question = '\n' + question
             self.data.append((prompt, question, tuple(output_choices)))
+            breakpoint()
 
     def __repr__(self):
         sorted_given_tasks, sorted_dist = tuple(zip(*sorted(list(self.cfg_dict.items()))))

@@ -436,7 +436,7 @@ def question_country1(examples: List[str], tokenizer: AutoTokenizer, symbol2='->
                 ans.append(continent)
             if 'country_upper' in ans_set:
                 ans.append(upper)
-            return f"{country}{symbol2}", [capital, continent, upper]
+            return f"{country}{symbol2}", ans
 
 def question_country2(examples: List[str], tokenizer: AutoTokenizer, symbol2='->') -> Tuple:
     while True:
