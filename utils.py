@@ -453,9 +453,9 @@ def task_vec_PCA_main(tv_files, args=None):
         # Pairwise mixes for 3 tasks with lambda=0.5
         lamb = 0.5
         pairs = [
-            [lamb, 1-lamb, 0],
-            [lamb, 0, 1-lamb],
-            [0, lamb, 1-lamb]
+            [lamb, 1-lamb, 0.0],
+            [lamb, 0.0, 1-lamb],
+            [0.0, lamb, 1-lamb]
         ]
         for dist in pairs:
             cfg_dict = {task: weight for task, weight in zip(task_values, dist)}
@@ -469,12 +469,12 @@ def task_vec_PCA_main(tv_files, args=None):
         # Pairwise mixes for 4 tasks with lambda=0.5
         lamb = 0.5
         pairs = [
-            [lamb, lamb, 0, 0],
-            [lamb, 0, lamb, 0],
-            [lamb, 0, 0, lamb],
-            [0, lamb, lamb, 0],
-            [0, lamb, 0, lamb],
-            [0, 0, lamb, lamb]
+            [lamb, lamb, 0.0, 0.0],
+            [lamb, 0.0, lamb, 0.0],
+            [lamb, 0.0, 0.0, lamb],
+            [0.0, lamb, lamb, 0.0],
+            [0.0, lamb, 0.0, lamb],
+            [0.0, 0.0, lamb, lamb]
         ]
         for dist in pairs:
             cfg_dict = {task: weight for task, weight in zip(task_values, dist)}
