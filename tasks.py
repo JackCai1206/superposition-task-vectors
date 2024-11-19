@@ -6,6 +6,11 @@ import string
 import numpy as np
 from transformers import set_seed
 from num2words import num2words
+import torch
+from hashlib import sha256
+
+continents = torch.load('country_continent_dict.pt', weights_only=True)
+capitals = torch.load('country_capital_dict.pt', weights_only=True)
 
 class OP1(Enum):
     ADD = 'ADD',
@@ -13,6 +18,15 @@ class OP1(Enum):
     COPY_A = 'COPY_A',
     COPY_B = 'COPY_B',
     COPY_C = 'COPY_C',
+    CAPITAL = 'CAPITAL',
+    CONTINENT = 'CONTINENT',
+    CAPITALIZE = 'CAPITALIZE',
+
+    locals().update({
+        f'COPY_LETTER_{i}': f'COPY_LETTER_{i}' for i in range(1, 9)
+    } | {
+        f'ADD_SIMPLE_{i}': f'ADD_SIMPLE_{i}' for i in range(1, 9)
+    })
 
 class OP2(Enum):
     ADD_1 = 'ADD_1',
@@ -36,10 +50,6 @@ class OP4(Enum):
     CAP = 'CAP',
     NOP = 'NOP'
 
-def sample_operands(k, num_operands=2, range_operands=(0, 100)):
-    AB = sample(list(product(range(*range_operands), repeat=num_operands)), k)
-    return AB
-
 class Dataset():
     def __init__(self, cfg_dict, num_examples, prompt_size, args, reseed=None, random_ans=None):
         if reseed:
@@ -53,6 +63,8 @@ class Dataset():
         assert sum(self.dist) == 1, f'Sum of distribution is not 1: {sum(self.dist)}'
         self.given_tasks = list(cfg_dict.keys())
         self.given_tasks = [tuple(task.split('/')) for task in self.given_tasks]
+
+        self.separator = args.separator
         
         # Gnerate the the corss-compositions of the two tasks
         self.all_tasks = set()
@@ -86,8 +98,25 @@ class Dataset():
 
     def __eq__(self, other):
         return self.data == other.data
-
+    
+    def sample_operands(self, k, ops_list, num_operands=2, range_operands=(0, 100)):
+        if OP1[ops_list[0][0]] in {OP1.CAPITAL, OP1.CONTINENT, OP1.CAPITALIZE}:
+            # The input is a country
+            sample_range = list(capitals.keys())
+        elif OP1[ops_list[0][0]].name.startswith('COPY_LETTER'):
+            # The input is a length 8 string
+            sample_range = string.ascii_letters
+        elif OP1[ops_list[0][0]].name.startswith('ADD_SIMPLE'):
+            # The input is a single digit number
+            sample_range = range(0, 10)
+        else:
+            # The input is a number
+            sample_range = range(*range_operands)
+        AB = [sample(sample_range, k=num_operands) for _ in range(k)]
+        return AB
+    
     def sample_operands_single(self, *ops_list):
+        raise NotImplementedError('sample_operands_single is deprecated')
         A = randint(0, 100)
         B_upper_min = 100
         for ops in ops_list:
@@ -143,6 +172,17 @@ class Dataset():
                     answer = B
                 elif op == OP1.COPY_C:
                     answer = C
+                elif op.name.startswith('COPY_LETTER'):
+                    question = ''.join(map(str, operands))
+                    answer = operands[int(op.name.split('_')[-1]) - 1]
+                elif op.name.startswith('ADD_SIMPLE'):
+                    answer = A + int(op.name.split('_')[-1])
+                elif op == OP1.CAPITAL:
+                    answer = capitals[A]
+                elif op == OP1.CONTINENT:
+                    answer = continents[A]
+                elif op == OP1.CAPITALIZE:
+                    answer = str.capitalize(A)
             elif i == 1:
                 assert op == 'NOP' or type(answer) == int
                 op = OP2[op]
@@ -204,14 +244,14 @@ class Dataset():
             assert len(set(indices)) == len([d for d in self.dist if d > 0])
             prompt = []
             if self.full_range_operands:
-                for j, operands in enumerate(sample_operands(self.prompt_size, num_operands=self.num_operands)):
-                    prompt.append('->'.join(self.get_task(*operands, ops=self.given_tasks[indices[j]])))
+                for j, operands in enumerate(self.sample_operands(self.prompt_size, self.given_tasks, num_operands=self.num_operands)):
+                    prompt.append(self.separator.join(self.get_task(*operands, ops=self.given_tasks[indices[j]])))
             else:
                 assert self.num_operands == 2, 'Only 2 operands are supported for non-full_range_operands'
                 for j in range(self.prompt_size):
                     oprations = self.given_tasks[indices[j]]
                     operands = self.sample_operands_single(oprations)
-                    prompt.append('->'.join(self.get_task(*operands, ops=oprations)))
+                    prompt.append(self.separator.join(self.get_task(*operands, ops=oprations)))
             prompt = '\n'.join(prompt)
 
             c = 0
@@ -221,7 +261,7 @@ class Dataset():
                 else:
                     range_operands = (0, 100)
                 if self.full_range_operands:
-                    operands = sample_operands(1, num_operands=self.num_operands, range_operands=range_operands)[0]
+                    operands = self.sample_operands(1, self.all_tasks, num_operands=self.num_operands, range_operands=range_operands)[0]
                 else:
                     operands = self.sample_operands_single(*self.all_tasks)
                 task_strs = []
@@ -236,14 +276,14 @@ class Dataset():
                 c += 1
                 if c > 1000:
                     raise Exception('Cannot find a question with unique answers per task')
-            self.data.append((prompt, '\n' + questions[0] + '->', tuple(answers)))
+            self.data.append((prompt, '\n' + questions[0] + self.separator, tuple(answers)))
     
     def __repr__(self):
         sorted_given_tasks, sorted_dist = tuple(zip(*sorted(list(self.cfg_dict.items()))))
         return f'Dataset({list(sorted_given_tasks)}, {list(sorted_dist)}, {self.num_examples}, {self.prompt_size}, {self.seed}, {self.random_ans}, {self.full_range_operands}, {self.num_operands})'
 
-    def __hash__(self):
-        return hash(tuple(self.data))
+    def get_hash(self):
+        return sha256(str(tuple(sorted(self.data))).encode()).hexdigest()
     
     simple_name_mapping = {
         "COPY_A/NOP/NOP/NOP": "copy(op1)",
@@ -253,9 +293,9 @@ class Dataset():
         "COPY_B/SUB_1/NOP/NOP": "op2 - 1",
         "COPY_B/NOP/NOP/NOP": "copy(op2)",
         "COPY_C/SUB_5/NOP/NOP": "op3 - 5",
-        "COPY_A/NOP/TO_FR/NOP": "to_fr(op1)",
-        "COPY_A/NOP/TO_DE/NOP": "to_de(op1)",
-        "COPY_A/NOP/TO_IT/NOP": "to_it(op1)"
+        "COPY_A/NOP/TO_FR/NOP": "to_fr",
+        "COPY_A/NOP/TO_DE/NOP": "to_de",
+        "COPY_A/NOP/TO_IT/NOP": "to_it"
     }
     
     def get_simple_name(self):
