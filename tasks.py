@@ -15,10 +15,10 @@ continents = torch.load('country_continent_dict.pt', weights_only=True)
 capitals = torch.load('country_capital_dict.pt', weights_only=True)
 
 class OP1(Enum):
-    ADD = 'ADD',
+    ADD = 'AplusB',
     SUB = 'SUB',
-    COPY_A = 'COPY_A',
-    COPY_B = 'COPY_B',
+    COPY_A = 'copyA',
+    COPY_B = 'copyB',
     COPY_C = 'COPY_C',
     CAPITAL = 'country_capital',
     CONTINENT = 'country_continent',
@@ -69,18 +69,54 @@ def get_task_func_dict(cfg_dict):
                     'name': 'country1',
                     'kwargs': {
                         'symbol2': '->',
-                        'ans_set': set((OP1[task[0]].value[0], ))
+                        'ans_set': [OP1[task[0]].value[0]]
                     }
                 }
             else:
-                question_dict['kwargs']['ans_set'].add(OP1[task[0]].value[0])
-        elif OP1[task[0]] in {OP1.ADD}:
+                question_dict['kwargs']['ans_set'].append(OP1[task[0]].value[0])
+        elif OP1[task[0]] in {OP1.COPY_A, OP1.COPY_B, OP1.ADD}:
+            if OP1[task[0]] == OP1.COPY_A:
+                task_funcs_dict[i] = {
+                    'name': 'copyA',
+                    'kwargs': {
+                        'low': 10,
+                        'high': 99,
+                    }
+                }
+            elif OP1[task[0]] == OP1.COPY_B:
+                task_funcs_dict[i] = {
+                    'name': 'copyB',
+                    'kwargs': {
+                        'low': 10,
+                        'high': 99,
+                    }
+                }
+            elif OP1[task[0]] == OP1.ADD:
+                task_funcs_dict[i] = {
+                    'name': 'AplusB',
+                    'kwargs': {
+                        'low': 10,
+                        'high': 99
+                    }
+                }
+            if question_dict is None:
+                question_dict = {
+                    'name': 'AB1',
+                    'kwargs': {
+                        'low': 10,
+                        'high': 99,
+                        'ans_set': [OP1[task[0]].value[0]]
+                    },
+                }
+            else:
+                question_dict['kwargs']['ans_set'].append(OP1[task[0]].value[0])
+        elif OP1[task[0]] in {OP1.ADD} and OP3[task[2]] != OP3.NOP:
             task_funcs_dict[i] = {
                 'name': 'APlusB_t',
                 'kwargs': {
                     'low': 10,
-                    'high': 100,
-                    'language': OP2[task[2]].value[0],
+                    'high': 99,
+                    'language': OP3[task[2]].value[0],
                     'symbol': '+',
                     'symbol2': '->'
                 }
@@ -89,8 +125,8 @@ def get_task_func_dict(cfg_dict):
                 'name': 'add_translate',
                 'kwargs': {
                     'low': 10,
-                    'high': 100,
-                    'lang_list': [OP2[t[2]].value for t in cfg_dict.keys()],
+                    'high': 99,
+                    'lang_list': [OP3[t[2]].value for t in cfg_dict.keys()],
                     'symbol': '+',
                     'symbol2': '->'
                 }
@@ -112,7 +148,8 @@ class Dataset():
         self.given_tasks = [tuple(task.split('/')) for task in self.given_tasks]
 
         self.separator = args.separator
-        
+        self.separator2 = args.separator2
+
         # Gnerate the the corss-compositions of the two tasks
         self.all_tasks = set()
         for i in range(4):
@@ -208,7 +245,7 @@ class Dataset():
         if len(operands) >= 3:
             C = operands[2]
         assert len(ops) == 4, ops
-        question = '@'.join(map(str, operands))
+        question = self.separator2.join(map(str, operands))
         answer = None
         for i, op in enumerate(ops):
             if i == 0:

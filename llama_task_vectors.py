@@ -35,6 +35,7 @@ class ScriptArguments:
     out_dir: str = 'out'
     layers: List[int] = None
     separator: str = '->'
+    separator2: str = '@'
     fit_PCA_all_classes: bool = False
     use_alt_dataset_impl: bool = False
     dim_reduc_method: str = 'LDA'
@@ -73,7 +74,7 @@ if __name__ == '__main__':
     if args.do_residual: mixed_dataset_residual_main(tv_file_1, tv_file_2, tv_file_3, args)
 
     if args.do_tv_PCA:
-        if args.task3 and args.task4:
-            task_vec_PCA_main([tv_file_1, tv_file_2, tv_file_3, tv_file_4], args)
-        elif args.task3:
-            task_vec_PCA_main([tv_file_1, tv_file_2, tv_file_3], args)
+        tv_files = [tv_file_1, tv_file_2]
+        if args.task3: tv_files.append(tv_file_3)
+        if args.task4: tv_files.append(tv_file_4)
+        task_vec_PCA_main(tv_files, args)

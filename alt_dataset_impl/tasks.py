@@ -332,7 +332,7 @@ def question_digit(examples: List[str], input: "random") -> Tuple:
                 return f"{digit}->", [str(next_digit), digit_translation(digit), digit_translation(next_digit), str(digit)]
 
 # All functions that generate question string should have examples as the first variable
-def question_AB1(examples: List[str], tokenizer: AutoTokenizer, low : int, high : int, AplusB_num_digits=None, symbol='@', symbol2='=') -> Tuple:
+def question_AB1(examples: List[str], tokenizer: AutoTokenizer, low : int, high : int, AplusB_num_digits=None, symbol='@', symbol2='=', ans_set=[]) -> Tuple:
     while True:
         A = random.randint(low, high)
         B = random.randint(low, high)
@@ -340,7 +340,15 @@ def question_AB1(examples: List[str], tokenizer: AutoTokenizer, low : int, high 
             if len(str(A+B)) != AplusB_num_digits:
                 continue
         if f"{A}{symbol}{B}" not in "\n".join(examples):
-            return f"{A}{symbol}{B}{symbol2}", [str(A), str(B), str(A+B)]
+            ans = []
+            for task in ans_set:
+                if task == 'copyA':
+                    ans.append(str(A))
+                elif task == 'copyB':
+                    ans.append(str(B))
+                elif task == 'AplusB':
+                    ans.append(str(A+B))
+            return f"{A}{symbol}{B}{symbol2}", ans
         
 def question_1(examples: List[str], tokenizer: AutoTokenizer, low : int, high : int, C : int, symbol='@', symbol2='=') -> Tuple:
     while True:
@@ -422,7 +430,7 @@ def question_add_translate(examples: List[str], tokenizer: AutoTokenizer, low : 
                 gt_lst.append(translated)
             return f"{A}{symbol}{B}{symbol2}", gt_lst
 
-def question_country1(examples: List[str], tokenizer: AutoTokenizer, symbol2='->', ans_set=set()) -> Tuple:
+def question_country1(examples: List[str], tokenizer: AutoTokenizer, symbol2='->', ans_set=[]) -> Tuple:
     while True:
         country = random.choice(list(country_capital_dict.keys()))
         if country not in "\n".join(examples):
@@ -430,12 +438,13 @@ def question_country1(examples: List[str], tokenizer: AutoTokenizer, symbol2='->
             continent = country_continent_dict[country]
             upper = country.upper()
             ans = []
-            if 'country_capital' in ans_set:
-                ans.append(capital)
-            if 'country_continent' in ans_set:
-                ans.append(continent)
-            if 'country_upper' in ans_set:
-                ans.append(upper)
+            for task in ans_set:
+                if task == 'country_capital':
+                    ans.append(capital)
+                if task == 'country_continent':
+                    ans.append(continent)
+                if task == 'country_upper':
+                    ans.append(upper)
             return f"{country}{symbol2}", ans
 
 def question_country2(examples: List[str], tokenizer: AutoTokenizer, symbol2='->') -> Tuple:

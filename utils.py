@@ -427,8 +427,8 @@ def task_vec_PCA_main(tv_files, args=None):
     """
     # Get number of tasks
     num_tasks = len(tv_files)
-    if num_tasks not in [3, 4]:
-        raise ValueError("Number of task vectors must be either 3 or 4")
+    if num_tasks not in [2, 3, 4]:
+        raise ValueError("Number of task vectors must be either 2 or 3 or 4")
     
     # Get best layers
     best_layers = [tv_file['best_layer'] for tv_file in tv_files]
@@ -448,8 +448,16 @@ def task_vec_PCA_main(tv_files, args=None):
     mixed_cfg_dicts = []
     
     # Single task configurations (already included in tv_files)
-    
-    if num_tasks == 3:
+    if num_tasks == 2:
+        # Pairwise mixes for 2 tasks with lambda=0.5
+        lamb = 0.5
+        pairs = [
+            [lamb, 1-lamb]
+        ]
+        for dist in pairs:
+            cfg_dict = {task: weight for task, weight in zip(task_values, dist)}
+            mixed_cfg_dicts.append(cfg_dict)
+    elif num_tasks == 3:
         # Pairwise mixes for 3 tasks with lambda=0.5
         lamb = 0.5
         pairs = [
@@ -516,7 +524,7 @@ def task_vec_PCA_main(tv_files, args=None):
                 pca.fit(fit_tv)
                 result = np.stack([pca.transform(tv.float()) for tv in all_tv])
             elif method == 'LDA':
-                lda = LinearDiscriminantAnalysis(n_components=None, solver='svd')
+                lda = LinearDiscriminantAnalysis(n_components=None)
                 fit_tv = (fit_tv - fit_tv.mean(0))
                 lda.fit(fit_tv, torch.arange(num_classes).repeat(args.num_examples, 1).T.flatten())
                 result = np.stack([lda.transform(tv.float()) for tv in all_tv])
