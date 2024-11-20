@@ -151,7 +151,7 @@ def align_sentences(sent, sep_id, pad_id):
 def patch_get_output_prob(model, tokenizer, device, question, ans, patch=True, patch_layer=None, tv_mix=None, return_pred=False, separator='->'):
     if type(question) == str:
         question = [question]
-    inputs = tokenizer([q+a for q,a in zip(question, ans)], return_tensors="pt", padding=True)
+    inputs = tokenizer([q+a for q,a in zip(question, ans)], return_tensors="pt", padding=True, add_special_tokens=not isinstance(tokenizer, CharacterTokenizer))
     input_ids, attention_mask, sep_pos = align_sentences(inputs, tokenizer.convert_tokens_to_ids(separator), tokenizer.pad_token_id)
     with torch.no_grad():
         if patch:
@@ -188,6 +188,7 @@ def eval_task_vectors(model, tokenizer, device, args, dataset, task_vecs, use_pr
                 assert len(answers) == 1
                 ans = answers[0]
                 ans_prob, pred = patch_get_output_prob(model, tokenizer, device, question, ans, patch=True, patch_layer=patch_layer, tv_mix=tv_A, return_pred=True, separator=args.separator)
+                pred = [p.strip() for p in pred]
                 ans_probs += ans_prob.tolist()
                 num_correct += sum([a == p for a, p in zip(ans, pred)])
         acc_A.append(num_correct / len(dataset))
@@ -272,8 +273,8 @@ def get_task_vec_interpolation_v2(model, tokenizer, device, args, task_vecs_A, t
         batch_ans = list(zip(*answers))
         prob_dict = [[] for _ in range(len(batch_ans))] # probability sweep for each task
         
-        initial_dist = torch.tensor([1, 0, 0])
-        final_dist = torch.tensor([0, 1, 0])
+        initial_dist = torch.tensor([1.0/3, 1.0/3, 1.0/3])
+        final_dist = torch.tensor([0.0, 0.5, 0.5])
         for lamb in lambs:
             tv_mix = (initial_dist * (1-lamb) + final_dist * lamb) @ torch.stack([tv_A, tv_B, tv_C]).to(torch.float)
             # multiply the conditional probabilities of the tokens in the string
@@ -289,8 +290,8 @@ def get_task_mixing(model, tokenizer, device, task1, task2, task3, lambs, layers
     bz = 8
     prob_dict = torch.zeros(args.num_examples, 9, len(lambs)) # probability sweep for each task
 
-    initial_dist = torch.tensor([1, 0, 0])
-    final_dist = torch.tensor([0, 1, 0])
+    initial_dist = torch.tensor([1.0/3, 1.0/3, 1.0/3])
+    final_dist = torch.tensor([0.0, 0.5, 0.5])
     for lamb_i, lamb in enumerate(lambs):
         dist = (initial_dist * (1-lamb) + final_dist * lamb)
         ds_cfg = {t: d.item() for i, (t, d) in enumerate(zip([task1, task2, task3][:num_tasks], dist))}
@@ -302,7 +303,7 @@ def get_task_mixing(model, tokenizer, device, task1, task2, task3, lambs, layers
             batch_ans = list(zip(*answers))
             # multiply the conditional probabilities of the tokens in the string
             for task_num, ans in enumerate(batch_ans[:num_tasks]):
-                ans_prob = patch_get_output_prob(model, tokenizer, device, questions, ans, patch=False)
+                ans_prob = patch_get_output_prob(model, tokenizer, device, questions, ans, patch=False, separator=args.separator)
                 prob_dict[i:i+bz, task_num, lamb_i] = ans_prob
     result = prob_dict
     return result, lambs
@@ -324,8 +325,11 @@ def task_vec_interpolation_main(tv_file_1, tv_file_2, tv_file_3, args):
     # # Interpolate between the task vectors
     result_loc = f'{args.out_dir}/task_vector_interpolation/{args.model_id}/{get_args_hash(args)}_results.pt'
     lambs = torch.linspace(0, 1, 30)
-    lambs2 = torch.linspace(0, 1, 5)
-    layers = list(range(min(best_layer_1, best_layer_2, best_layer_3), max(best_layer_1, best_layer_2, best_layer_3) + 1))
+    lambs2 = torch.linspace(0, 1, 7)
+    if args.layers is None: 
+        layers = list(range(min(best_layer_1, best_layer_2, best_layer_3), max(best_layer_1, best_layer_2, best_layer_3) + 1))
+    else:
+        layers = args.layers
     if os.path.exists(result_loc) and args.use_results_cache:
         print(f'Loading results from {result_loc}')
         result = torch.load(result_loc)
@@ -552,13 +556,14 @@ def task_vec_PCA_main(tv_files, args=None):
         colors = sns.color_palette('husl', len(task_names))
         
         # Calculate distances between task vectors
-        for i, (task_vecs, label) in enumerate(zip(result, task_names)):
-            for j, (task_vecs2, label2) in enumerate(zip(result, task_names)):
+        all_tv = [tv_file['task_vecs'][layer] for tv_file in all_tv_files]
+        for i, (task_vecs, tv_orig, label) in enumerate(zip(result, all_tv, task_names)):
+            for j, (task_vecs2, tv_orig2, label2) in enumerate(zip(result, all_tv, task_names)):
                 if i == j:
                     continue
                 for mode in ['distance-full', 'distance-subspace']:
                     if mode == 'distance-full':
-                        dist = np.linalg.norm(task_vecs.mean(0) - task_vecs2.mean(0), axis=-1)
+                        dist = np.linalg.norm(tv_orig.float().numpy().mean(0) - tv_orig2.float().numpy().mean(0), axis=-1)
                     elif mode == 'distance-subspace':
                         dist = np.linalg.norm(task_vecs.mean(0)[:2] - task_vecs2.mean(0)[:2], axis=-1)
                     with open(save_loc.replace('.pdf', f'-{mode}.csv'), 'a+') as f:

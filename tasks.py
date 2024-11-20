@@ -27,7 +27,7 @@ class OP1(Enum):
     locals().update({
         f'COPY_LETTER_{i}': f'COPY_LETTER_{i}' for i in range(1, 9)
     } | {
-        f'ADD_SIMPLE_{i}': f'ADD_SIMPLE_{i}' for i in range(1, 9)
+        f'ADD_SIMPLE_{i}': f'ADD_SIMPLE_{i}' for i in range(0, 10)
     })
 
 class OP2(Enum):
@@ -143,7 +143,7 @@ class Dataset():
             self.seed = 42
         
         self.dist = list(cfg_dict.values())
-        assert sum(self.dist) == 1, f'Sum of distribution is not 1: {sum(self.dist)}'
+        assert abs(1 - sum(self.dist)) < 1e-6, f'Sum of distribution is not 1: {sum(self.dist)}'
         self.given_tasks = list(cfg_dict.keys())
         self.given_tasks = [tuple(task.split('/')) for task in self.given_tasks]
 
@@ -264,7 +264,7 @@ class Dataset():
                     question = ''.join(map(str, operands))
                     answer = operands[int(op.name.split('_')[-1]) - 1]
                 elif op.name.startswith('ADD_SIMPLE'):
-                    answer = A + int(op.name.split('_')[-1])
+                    answer = (A + int(op.name.split('_')[-1])) % 10
                 elif op == OP1.CAPITAL:
                     answer = capitals[A]
                 elif op == OP1.CONTINENT:
@@ -416,6 +416,10 @@ class Dataset():
         "COPY_A/NOP/TO_FR/NOP": "to_fr",
         "COPY_A/NOP/TO_DE/NOP": "to_de",
         "COPY_A/NOP/TO_IT/NOP": "to_it"
+    } | {
+        f"ADD_SIMPLE_{i}/NOP/NOP/NOP": f"plus{i}" for i in range(0, 10)
+    } | {
+        f"COPY_LETTER_{i}/NOP/NOP/NOP": f"ret{i}" for i in range(1, 9)
     }
     
     def get_simple_name(self):
